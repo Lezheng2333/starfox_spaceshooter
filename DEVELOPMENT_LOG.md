@@ -231,3 +231,48 @@ Ver 1.0.1 | 2026-05-08
       指向正确文件名
 
 ================================================================
+  Ver 1.0.4-refactored | 2026-05-10  (平行分支 — 完成后转正为后续开发主线)
+================================================================
+
+  ⚡ OOP 重构计划制定
+    - 分析原 2935 行单文件代码，梳理 7 大系统（透视/飞机/子弹/外星/Boss/
+      音频/UI）的耦合关系
+    - 确定设计原则：组合优于继承、数据驱动（ChapterConfig）、函数指针替代
+      虚函数、每阶段可编译可运行
+    - 设计 20 个核心类：引擎层(Renderer/AudioEngine)、实体层(Player/
+      BulletManager/AlienManager/ParticleManager/ShockwaveManager)、
+      Boss系统(Boss+BossConfig)、章节系统(ChapterConfig+ChapterManager+
+      Background)、UI系统(Font+UIRenderer+MenuStateMachine)、主控(Game)
+    - Boss 吸收状态机去重：Intro 和 Phase2 共享 updateAbsorbStateMachine()
+      和 updateAbsorbAnimations()
+    - Alien 多态方案：int alienType tag + 函数指针，不引入虚函数
+    - ChapterConfig 数据驱动：5 个章节预配置差异化参数（生成速度/血量/Boss
+      属性/背景色/星星数量），Chapter 2-5 预留解锁机制
+
+  ⚡ 7-Phase 渐进重构实施
+    - Phase 1: Font / Renderer / AudioEngine / FloatingTextManager /
+      ParticleManager — 无行为变化
+    - Phase 2: Player / BulletManager / ShockwaveManager / AlienManager —
+      封装实体管理逻辑
+    - Phase 3: Boss + BossConfig — 吸收状态机去重，Boss 参数可配置
+    - Phase 4: ChapterConfig / ChapterManager / Background — 5 章节数据
+      驱动，Chapter 1 保持原有参数
+    - Phase 5: UIRenderer(绘制原语) / MenuStateMachine(统一菜单边沿检测)
+    - Phase 6: Game 类 — 组装所有管理器，main() 从 ~800行缩减至 15行
+    - Phase 7: 编译调试，修复 initializer-list/访问权限/背景对象等错误
+
+  ⚡ 编译修复与代码调整
+    - static const double → constexpr (C++11 要求)
+    - FloatingTextManager::all() 增加非 const 版本
+    - Boss::AbsorbState enum 提升为 public (Game 类需引用)
+    - Background 从临时栈对象改为 Game 成员指针 (避免每帧创建)
+    - soundCursor 从 static local 改为 Game 成员变量 (update/draw 同步)
+    - ESC 键从 keys[] 轮询改为 SDL_KEYDOWN 事件 (边沿触发)
+
+  ⚡ 当前状态
+    - 源码：space_shooting ver2.0.0 refactored.cpp (3159行, 20个类)
+    - 可执行：shooter_refactored
+    - 原始代码/可执行文件完好保留
+    - 已知问题：重构版存在未修复 bug，调试进行中
+
+================================================================

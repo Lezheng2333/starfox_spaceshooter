@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+*.app
+
+# 编译产物
+*/shooter
+
+# IDE
+.vscode/

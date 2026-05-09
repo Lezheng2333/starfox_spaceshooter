@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/Users/song_jiarui/Code/Github/极简空间射击/v2.0.0",
+    "command": "/usr/bin/clang++ -std=c++11 -I/opt/homebrew/include -I/opt/homebrew/include/SDL2 -D_THREAD_SAFE -c /Users/song_jiarui/Code/Github/极简空间射击/v2.0.0/space_shooting ver1.0.1.cpp -o /Users/song_jiarui/Code/Github/极简空间射击/v2.0.0/shooter",
+    "file": "/Users/song_jiarui/Code/Github/极简空间射击/v2.0.0/space_shooting ver1.0.1.cpp"
+  }
+]

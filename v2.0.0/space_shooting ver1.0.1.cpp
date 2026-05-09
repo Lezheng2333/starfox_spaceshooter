@@ -1323,7 +1323,7 @@ int main(int argc, char* argv[]) {
                         : 0.17 + 0.83 * depthBelow;
                     if (alienScale < 0.14) alienScale = 0.14;
                     if (alienScale > 1.0) alienScale = 1.0;
-                    double hitRadius = 22.0 * alienScale + 8.0;
+                    double hitRadius = 28.0 * alienScale + 12.0;
                     if (dx*dx + dy*dy < hitRadius * hitRadius) {
                         b.active = false;
                         // 无敌中的飞船：消弹但不扣血
@@ -1917,7 +1917,7 @@ void drawStartScreen() {
 
     drawString("W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
     SDL_SetRenderDrawColor(renderer, 120, 120, 120, 255);
-    drawString("Ver 1.0.1", 15, WIN_HEIGHT - 30, 2);
+    drawString("Ver 1.0.4", 15, WIN_HEIGHT - 30, 2);
 }
 
 // ============== 篇章选择 ==============

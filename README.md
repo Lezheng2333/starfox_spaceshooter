@@ -18,7 +18,7 @@ Control your starfighter in perspective space, shoot down alien ships, survive w
 
 > macOS 11.0+
 
-[Download v1.0.1](https://github.com/Lezheng2333/starfox_spaceshooter/releases/latest)
+[Download v1.0.1](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.0.1)
 
 Download the `.zip`, unzip, and run `Shooter.app`.
 

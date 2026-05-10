@@ -710,8 +710,8 @@ public:
 
     void reset() { bullets.clear(); fireCooldown = 0; updateParams(0); }
 
-    void updateParams(int scoreLevel) {
-        int lv = scoreLevel / 30; if (lv < 1) lv = 1;
+    void updateParams(int lv) {
+        if (lv < 1) lv = 1;
         double factor = std::pow(0.9, lv - 1);
         fireDelay = (int)(BASE_FIRE_DELAY * factor);
         if (fireDelay < 3) fireDelay = 3;
@@ -864,14 +864,14 @@ public:
         updateParams(0);
     }
 
-    void updateParams(int scoreLevel) {
-        int lv = scoreLevel / 30; if (lv < 1) lv = 1;
+    void updateParams(int lv) {
+        if (lv < 1) lv = 1;
         damage = 3 + (lv - 1);
         int sec = 12 - lv * 2; if (sec < 1) sec = 1;
         interval = sec * 60;
     }
 
-    void attemptAutoRelease(int score, const Player& player, FloatingTextManager& ft, AudioEngine* audio) {
+    void attemptAutoRelease(int score, const Player& player, FloatingTextManager& ft, AudioEngine* audio, ParticleManager* pm) {
         if (score < 30) return;
         int curLv = score / 30;
         if (curLv > lastLevel) {
@@ -883,20 +883,43 @@ public:
         }
         if (pending) {
             pending = false;
-            spawn(audio);
+            spawn(audio, pm);
         } else {
             timer++;
-            if (timer >= interval) { timer = 0; spawn(audio); }
+            if (timer >= interval) { timer = 0; spawn(audio, pm); }
         }
     }
 
-    void spawn(AudioEngine* audio) {
+    void spawn(AudioEngine* audio, ParticleManager* pm = nullptr) {
         if (audio) audio->sndShockwave();
         Shockwave sw;
         sw.y = WIN_HEIGHT;
         sw.id = nextID++;
         sw.active = true;
         shockwaves.push_back(sw);
+        if (pm) {
+            const double BA = WIN_WIDTH / 2.0 - 15.0;
+            const double BB = 75.0;
+            for (int i = 0; i < 40; ++i) {
+                double t = (rand() % 1000) / 1000.0;
+                double sx = CENTER_X + BA * (2.0 * t - 1.0);
+                double ratio = (sx - CENTER_X) / BA;
+                if (ratio > 1.0) ratio = 1.0;
+                if (ratio < -1.0) ratio = -1.0;
+                double sy = WIN_HEIGHT - BB * std::sqrt(1.0 - ratio * ratio);
+                double nx = (sx - CENTER_X) / BA;
+                double ny = (sy - WIN_HEIGHT) / BB;
+                double nlen = std::sqrt(nx*nx + ny*ny);
+                if (nlen < 0.01) { nx = 0; ny = -1; }
+                else { nx /= nlen; ny /= nlen; }
+                double speed = 1.5 + (rand() % 350) / 100.0;
+                pm->spawnGreenParticle(
+                    sx + (rand()%10-5), sy + (rand()%10-5),
+                    nx * speed + (rand()%40-20)/20.0,
+                    ny * speed + (rand()%40-20)/20.0,
+                    20 + rand() % 25);
+            }
+        }
     }
 
     void update() {
@@ -964,8 +987,8 @@ public:
         return false;
     }
 
-    int collideWithBoss(double bossX, double bossY, int bossLastHitBySW, int& bossBonusHp, int& bossHp,
-                        ParticleManager& pm, AudioEngine* audio) {
+    int collideWithBoss(double bossX, double bossY, int& bossLastHitBySW, int& bossBonusHp, int& bossHp,
+                        int& bossFlashTimer, ParticleManager& pm, AudioEngine* audio) {
         int dmgDealt = 0;
         for (auto& sw : shockwaves) {
             if (!sw.active) continue;
@@ -976,7 +999,9 @@ public:
             double swB = 75.0 * swA / (perspWidth(WIN_HEIGHT) / 2.0);
             double ddx = dx / swA, ddy = dy / swB;
             if (ddx*ddx + ddy*ddy < 1.0 || (std::abs(dx) < swA && std::abs(dy) < swB*0.8)) {
-                if (audio) { audio->sndBossHit(); }
+                bossLastHitBySW = sw.id;
+                bossFlashTimer = 8;
+                if (audio) audio->sndBossHit();
                 pm.spawnExplosion(bossX, bossY, 10);
                 int dmg = damage;
                 if (bossBonusHp > 0) {
@@ -1037,7 +1062,7 @@ public:
         return base;
     }
 
-    void spawnAlien() {
+    void spawnAlien(int score) {
         Alien a;
         a.targetT = 0.15 + (rand() % 700) / 1000.0;
         a.enterFrame = 0;
@@ -1050,7 +1075,7 @@ public:
         a.absorbFrame = 0; a.absorbDuration = 0;
         a.absorbStartX = 0; a.absorbStartY = 0;
         a.alienType = 0;
-        // Determine hp
+        int hpBonus = (score >= 60) ? (score / 30 - 1) * 2 : 0;
         a.hp = ALIEN_MIN_HP + hpBonus + rand() % (ALIEN_MAX_HP - ALIEN_MIN_HP + 1);
         a.maxHp = a.hp;
         a.active = true;
@@ -1074,7 +1099,7 @@ public:
         aliens.push_back(a);
     }
 
-    void spawnAlienFromBoss(double bossX, double bossY) {
+    void spawnAlienFromBoss(double bossX, double bossY, int score) {
         Alien a;
         a.startT = (bossX - perspLeft(bossY)) / perspWidth(bossY);
         if (a.startT < 0.1) a.startT = 0.1;
@@ -1095,6 +1120,7 @@ public:
         a.absorbFrame = 0; a.absorbDuration = 0;
         a.absorbStartX = 0; a.absorbStartY = 0;
         a.alienType = 0;
+        int hpBonus = (score >= 60) ? (score / 30 - 1) * 2 : 0;
         a.hp = ALIEN_MIN_HP + hpBonus + rand() % (ALIEN_MAX_HP - ALIEN_MIN_HP + 1);
         a.maxHp = a.hp;
         a.active = true;
@@ -1288,11 +1314,15 @@ public:
     // Accessors
     double getX() const { return x; }
     double getY() const { return y; }
+    void setY(double ny) { y = ny; }
     int getHp() const { return hp; }
     int getMaxHp() const { return maxHp; }
     int getBonusHp() const { return bonusHp; }
     int getLastHitBySW() const { return lastHitBySW; }
+    int& lastHitBySWRef() { return lastHitBySW; }
     bool isActive() const { return active; }
+    void setActive(bool a) { active = a; }
+    void setMaxHp(int m) { maxHp = m; }
     bool isEntering() const { return entering; }
     int getShakeTimer() const { return shakeTimer; }
     int getShakeX() const { return shakeX; }
@@ -1437,7 +1467,6 @@ public:
                 aliens.all().clear();
                 postAbsorbTimer = 30;
                 absorbTimer = -1;
-                healWavesEnabled = true;
                 absorbState = IDLE;
                 return true;  // all done
             }
@@ -2028,6 +2057,16 @@ public:
     void resetGame() {
         score = 0;
         gameOver = false;
+        atStartScreen = true;
+        atTestSelect = false;
+        atChapterSelect = false;
+        atOptionScreen = false;
+        atSoundMenu = false;
+        menuSelection = 0;
+        startMenuSelection = 0;
+        testScoreSelection = 0;
+        chapterSelection = 0;
+        pauseMenuSelection = 0;
         difficultyTimer = 0;
         lastShockwaveLevel = 0;
         baseHP = 10;
@@ -2045,6 +2084,7 @@ public:
         bossDefeatTimer = 0; defeatAlienTimer = 0; defeatReturnTimer = 0;
         defeatFWTimer = 0; defeatMCDelay = 0; defeatFadeTimer = 0;
         countdown = -1; countdownFrame = 0;
+        soundCursor = 0;
         if (background) { delete background; background = new Background(chapterMgr.getConfig()); }
     }
 
@@ -2062,6 +2102,7 @@ public:
 
             const Uint8* keys = SDL_GetKeyboardState(NULL);
             audio.setBossMusic(phase == PHASE_BOSS_FIGHT && boss.isActive());
+            if (background) background->update();
 
             // ======== Esc key global ========
             if (escPressed && !gameOver && !atStartScreen && !atTestSelect && !atChapterSelect
@@ -2136,7 +2177,7 @@ private:
         if (downNow && !downWas) startMenuSelection = (startMenuSelection + 1) % 5;
         if (enterNow && !enterWas) {
             if (startMenuSelection == 0) {
-                atStartScreen = false; resetGame();
+                resetGame(); atStartScreen = false;
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
@@ -2159,16 +2200,7 @@ private:
     void drawStartScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
-        chapterMgr.getConfig(); // for background
-        // draw static background
-        SDL_SetRenderDrawColor(r, 80, 80, 80, 255);
-        SDL_RenderDrawLine(r, 0, HORIZON_Y, WIN_WIDTH, HORIZON_Y);
-        SDL_SetRenderDrawColor(r, 50, 50, 50, 255);
-        for (int i = 0; i < 17; ++i) {
-            double t = (double)i / 16;
-            SDL_RenderDrawLine(r, (int)(t*WIN_WIDTH), WIN_HEIGHT,
-                               (int)(HORIZON_LEFT+t*(HORIZON_RIGHT-HORIZON_LEFT)), HORIZON_Y);
-        }
+        if (background) background->drawStars(r);
 
         font.drawString(r, "STAR FOX", CENTER_X - 96, 70, 4);
         font.drawString(r, "SPACE SHOOTER", CENTER_X - 117, 120, 3);
@@ -2206,8 +2238,7 @@ private:
         if (enterNow && !enterWas) {
             if (chapterMgr.isUnlocked(chapterSelection)) {
                 chapterMgr.selectChapter(chapterSelection);
-                atChapterSelect = false;
-                resetGame();
+                resetGame(); atStartScreen = false; atChapterSelect = false;
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
@@ -2220,6 +2251,7 @@ private:
     void drawChapterScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
+        if (background) background->drawStars(r);
         font.drawString(r, "SELECT CHAPTER", CENTER_X - 180, 60, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 100, CENTER_X + 180, 100);
@@ -2254,14 +2286,18 @@ private:
         if (downNow && !downWas) testScoreSelection = (testScoreSelection + 1) % 9;
         if (enterNow && !enterWas) {
             atTestSelect = false; tJustEntered = true;
-            resetGame();
-            alienMgr.applyChapterConfig(chapterMgr.getConfig());
+            atStartScreen = false;
             const int testScores[6] = {30, 60, 90, 120, 150, 180};
             if (testScoreSelection < 6) {
                 score = testScores[testScoreSelection];
                 shockwaveMgr.setPending(true);
+                bulletMgr.updateParams(score / 30);
+                shockwaveMgr.updateParams(score / 30);
             } else if (testScoreSelection == 6) {
+                // 200 BOSS: 直接进入Boss登场动画
                 score = 200;
+                bulletMgr.updateParams(score / 30);
+                shockwaveMgr.updateParams(score / 30);
                 boss.trigger();
                 phase = PHASE_BOSS_INTRO;
                 alienMgr.setAllInvincible();
@@ -2279,13 +2315,19 @@ private:
                     alienMgr.all().push_back(a);
                 }
             } else if (testScoreSelection == 7) {
+                // BOSS PH.2: 直接进入Boss二阶段
                 score = 200;
-                boss.trigger();
+                bulletMgr.updateParams(score / 30);
+                shockwaveMgr.updateParams(score / 30);
+                boss.setY(90);
+                boss.hpRef() = 500; boss.setMaxHp(1000); boss.bonusHpRef() = 0;
+                boss.setActive(true);
                 boss.enteringRef() = false;
                 boss.shakeTimerRef() = 0;
                 boss.phase2TriggeredRef() = true;
-                boss.hpRef() = 500; boss.bonusHpRef() = 0;
+                boss.flashTimerRef() = 0;
                 phase = PHASE_BOSS_PHASE2;
+                boss.setHealWavesEnabled(false);
                 for (int i = 0; i < 5; ++i) {
                     Alien a;
                     a.targetT = 0.15 + (rand() % 700) / 1000.0;
@@ -2300,31 +2342,21 @@ private:
                     alienMgr.all().push_back(a);
                 }
             } else {
+                // BOSS 1HP: 快速检验战败流程
                 score = 200;
-                boss.trigger();
+                bulletMgr.updateParams(score / 30);
+                shockwaveMgr.updateParams(score / 30);
+                boss.setY(90);
+                boss.hpRef() = 1; boss.setMaxHp(1000); boss.bonusHpRef() = 0;
+                boss.setActive(true);
                 boss.enteringRef() = false;
                 boss.shakeTimerRef() = 0;
                 boss.phase2TriggeredRef() = true;
-                boss.hpRef() = 1;
+                boss.flashTimerRef() = 0;
                 phase = PHASE_BOSS_FIGHT;
                 boss.setHealWavesEnabled(true);
                 shockwaveMgr.setPending(true);
-                for (int i = 0; i < 5; ++i) {
-                    Alien a;
-                    a.targetT = 0.15 + (rand() % 700) / 1000.0;
-                    a.t = a.targetT; a.y = 120.0 + (rand() % 180);
-                    a.entering = false; a.enterFromTop = false; a.enterFromBoss = false;
-                    a.invincibleFrames = -1; a.lastHitBySW = -1; a.lastHealHit = -1;
-                    a.absorbFrame = 0; a.absorbDuration = 0;
-                    a.absorbStartX = 0; a.absorbStartY = 0; a.beingAbsorbed = false;
-                    a.alienType = 0;
-                    a.hp = 3 + rand() % 3; a.maxHp = a.hp;
-                    a.active = true;
-                    alienMgr.all().push_back(a);
-                }
             }
-            bulletMgr.updateParams(score / 30);
-            shockwaveMgr.updateParams(score / 30);
         }
         upWas=upNow; downWas=downNow; enterWas=enterNow;
     }
@@ -2332,6 +2364,7 @@ private:
     void drawTestScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
+        if (background) background->drawStars(r);
         font.drawString(r, "SELECT SCORE", CENTER_X - 144, 50, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
@@ -2374,6 +2407,7 @@ private:
     void drawOptionScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
+        if (background) background->drawStars(r);
         font.drawString(r, "OPTIONS", CENTER_X - 84, 40, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 78, CENTER_X + 180, 78);
@@ -2439,6 +2473,7 @@ private:
     void drawSoundMenu() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
+        if (background) background->drawStars(r);
         font.drawString(r, "SOUND", CENTER_X - 60, 40, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 78, CENTER_X + 180, 78);
@@ -2501,13 +2536,13 @@ private:
             // Spawn
             if (phase == PHASE_BOSS_FIGHT && boss.isActive()) {
                 if (alienMgr.spawnTimerRef() <= 0) {
-                    alienMgr.spawnAlienFromBoss(boss.getX(), boss.getY());
+                    alienMgr.spawnAlienFromBoss(boss.getX(), boss.getY(), score);
                     alienMgr.spawnTimerRef() = alienMgr.currentSpawnInterval(score, difficultyTimer) + (rand() % 20);
                 }
                 alienMgr.spawnTimerRef()--;
             } else if (phase == PHASE_PLAY) {
                 if (alienMgr.spawnTimerRef() <= 0) {
-                    alienMgr.spawnAlien();
+                    alienMgr.spawnAlien(score);
                     alienMgr.spawnTimerRef() = alienMgr.currentSpawnInterval(score, difficultyTimer) + (rand() % 30);
                 }
                 alienMgr.spawnTimerRef()--;
@@ -2515,16 +2550,18 @@ private:
 
             // Shockwave
             if (score >= 30 && (phase == PHASE_PLAY || phase == PHASE_BOSS_FIGHT)) {
-                shockwaveMgr.attemptAutoRelease(score, player, floatingTextMgr, &audio);
+                shockwaveMgr.attemptAutoRelease(score, player, floatingTextMgr, &audio, &particleMgr);
             }
 
             // Updates
             bulletMgr.update(alienMgr.all());
             if (phase != PHASE_BOSS_INTRO && phase != PHASE_BOSS_PHASE2) {
                 alienMgr.update(false, 0, gameOver, baseHP, particleMgr, &audio);
+                if (gameOver) menuSelection = 0;
             }
             particleMgr.update();
             shockwaveMgr.update();
+            floatingTextMgr.update();
 
             // Boss movement
             if (phase == PHASE_BOSS_FIGHT || phase == PHASE_BOSS_PHASE2) {
@@ -2575,6 +2612,7 @@ private:
                 if (boss.getShakeTimer() == 0 && boss.absorbTimerRef() >= 0) {
                     if (boss.updateAbsorbStateMachine(alienMgr, bulletMgr, particleMgr, &audio)) {
                         alienMgr.setAllVulnerable();
+                        boss.setHealWavesEnabled(true);
                     }
                     boss.updateAbsorbAnimations(alienMgr, particleMgr);
                 }
@@ -2595,6 +2633,7 @@ private:
                     double depthBelow = (a.y - HORIZON_Y) / (WIN_HEIGHT - HORIZON_Y);
                     double alienScale = (depthBelow < 0) ? 0.17 : 0.17 + 0.83 * depthBelow;
                     if (alienScale < 0.14) alienScale = 0.14;
+                    if (alienScale > 1.0) alienScale = 1.0;
                     double hitRadius = 28.0 * alienScale + 12.0;
                     if (dx*dx + dy*dy < hitRadius * hitRadius) {
                         b.active = false;
@@ -2668,8 +2707,8 @@ private:
                     }
                 }
                 // Shockwave vs Boss
-                shockwaveMgr.collideWithBoss(boss.getX(), boss.getY(), boss.getLastHitBySW(),
-                    boss.bonusHpRef(), boss.hpRef(), particleMgr, &audio);
+                shockwaveMgr.collideWithBoss(boss.getX(), boss.getY(), boss.lastHitBySWRef(),
+                    boss.bonusHpRef(), boss.hpRef(), boss.flashTimerRef(), particleMgr, &audio);
                 if (boss.getHp() <= 0) {
                     phase = PHASE_BOSS_DEFEAT;
                     bossDefeatTimer = 0;
@@ -2834,7 +2873,7 @@ private:
         }
         // Energy bar
         {
-            const int EBAR_X = WIN_WIDTH - 20 - 10 * 14 - 14;
+            const int EBAR_X = WIN_WIDTH - 20 - (10 - 1) * 14;
             const int EBAR_W = 10 * 14;
             const int EBAR_Y = 46, EBAR_H = 6;
             SDL_SetRenderDrawColor(r, 30, 30, 30, 255);
@@ -3062,7 +3101,7 @@ private:
         static bool upWas2 = false, downWas2 = false, enterWas2 = false;
         bool upNow2 = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
         bool downNow2 = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
-        bool enterNow2 = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+        bool enterNow2 = keys[SDL_SCANCODE_RETURN];
         if (upNow2 && !upWas2)   menuSelection = (menuSelection - 1 + 2) % 2;
         if (downNow2 && !downWas2) menuSelection = (menuSelection + 1) % 2;
         if (enterNow2 && !enterWas2) {

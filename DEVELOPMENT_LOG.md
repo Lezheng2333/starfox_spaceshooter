@@ -248,7 +248,7 @@ Ver 1.0.1 | 2026-05-08
     - main() 从 ~800行缩减至 15行
     - 编译修复：static const double→constexpr / AbsorbState 提升 public /
       Background 成员指针化 / soundCursor 同步 / ESC 事件边沿触发
-    - BUGFIX: 逐行比对原始代码，共发现并修复 18 个 bug
+    - BUGFIX: 逐行比对原始代码，共发现并修复 22 个 bug
         Bug 1  星空不更新 (background->update 未调用)
         Bug 2  冲击波缺绿色粒子 (spawn 未生成拱顶特效)
         Bug 3  外星 HP 不随分数增长 (spawn 缺 score 参数)
@@ -271,7 +271,31 @@ Ver 1.0.1 | 2026-05-08
         Bug 17 GameOver 界面空格键触发确认 — 改为仅 SDL_SCANCODE_RETURN
         Bug 18 Boss 一阶段释放治疗红波 — updateAbsorbStateMachine() 被 Intro
           和 Phase2 共用，healWavesEnabled=true 在 Intro 吸收完成后错误触发
-    - 当前状态：18 个 bug 全部修复，编译零错误零警告，运行正常
+        Bug 19 Boss 战败序列断裂 — updateBossDefeat() 在 frame 300 最终爆炸处
+          缺少 boss.setActive(false) 和 defeatAlienTimer=0；缺少
+          floatingTextMgr.update() 调用
+        Bug 20 冲击波击杀后参数不更新 — collideWithAlien() 内 score++ 后未调用
+          bulletMgr/shockwaveMgr.updateParams()，参数停滞在旧等级
+        Bug 21 结束界面不显示 — missionComplete 被单独 else-if 分支拦截，
+          updateBossDefeat() 不再执行，defeatFadeTimer 停止递增，
+          遮罩透明度卡在 3/255 不可见
+        Bug 22 Boss动画阶段外星飞船未全部变蓝 — alienMgr.update() 在入场
+          完成时将 invincibleFrames 从 -1 覆盖为 3，3帧后 decrement 到 0
+          变红；修复为 update() 后重新 setAllInvincible()
+    - 当前状态：22 个 bug 全部修复，编译零错误零警告，运行正常
     - 待验证：全流程功能测试（Play/Boss/Test/菜单/暂停/GameOver）
+    - 全量设计审计 (2026-05-10): 对照开发日志 v0.0.1 至 v1.0.4 全部版本，
+      逐项比对原始代码与重构代码的游戏设计要素，确认以下全部一致：
+      透视系统(3函数) / 星空闪烁 / WASD+翻滚 / 外星缩放 / 菱形外形 /
+      圆拱基地 / 爆炸粒子 / 10HP星号 / 子弹85%失效 / 暂停+倒计时碎裂 /
+      蓝无敌红受击 / 绿色冲击波渐隐 / Alien HP 3-5 / per-frame唯一命中 /
+      Boss 200分触发 / 五阶段状态机(INTRO→FIGHT→PHASE2→DEFEAT) /
+      HP 1000 / ∞形移动 / 蓝色光束吸收+螺旋收缩 / 治疗红波420帧30HP /
+      血条400px / 5项开始菜单 / 黄色光标 / 9项测试模式 / 瞄准辅助 /
+      44100Hz音频+全部SFX / BGM 32+16音符Boss切换 / 音量EQ滑条 /
+      Boss 5秒爆炸+链式清场 / MISSION COMPLETE / smoothstep回中 /
+      烟花2秒淡入 / 飞机上翻修复 / 方向改变翻滚 / 机头对齐消失点 /
+      治疗红波+Phase2冲击波透视圆形 / 12新增字符 / 能量条得分驱动 /
+      180分常绿 / Chapter 1-5选择 / 碰撞半径28*scale+12
 
 ================================================================

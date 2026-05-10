@@ -2131,10 +2131,6 @@ public:
             } else if (atSoundMenu) {
                 updateSoundMenu(keys);
                 drawSoundMenu();
-            } else if (missionComplete) {
-                updateMissionComplete(keys);
-                drawGameplayFrame();
-                drawMissionComplete();
             } else if (gameOver) {
                 updateGameOverScreen(keys, running);
                 drawGameplayFrame();
@@ -2148,6 +2144,7 @@ public:
                 // ======== GAMEPLAY ========
                 updateGameplay(keys);
                 drawGameplayFrame();
+                if (missionComplete) drawMissionComplete();
                 if (paused && countdown >= 0) drawCountdown();
                 else if (paused) drawPauseMenu();
             }
@@ -2592,6 +2589,7 @@ private:
                 boss.updateEnterAnimation(&audio);
                 boss.updateShake(&audio);
                 alienMgr.update(true, 0.2, gameOver, baseHP, particleMgr, &audio);
+                alienMgr.setAllInvincible(); // keep all aliens blue after entry completes
                 // Absorb logic
                 if (!boss.isEntering() && boss.getShakeTimer() == 0 && boss.absorbTimerRef() >= 0) {
                     if (boss.updateAbsorbStateMachine(alienMgr, bulletMgr, particleMgr, &audio)) {
@@ -2609,6 +2607,7 @@ private:
             if (phase == PHASE_BOSS_PHASE2) {
                 boss.updateShake(&audio);
                 alienMgr.update(true, 0.2, gameOver, baseHP, particleMgr, &audio);
+                alienMgr.setAllInvincible(); // keep all aliens blue after entry completes
                 if (boss.getShakeTimer() == 0 && boss.absorbTimerRef() >= 0) {
                     if (boss.updateAbsorbStateMachine(alienMgr, bulletMgr, particleMgr, &audio)) {
                         alienMgr.setAllVulnerable();
@@ -2662,7 +2661,12 @@ private:
             // Shockwave vs Alien
             for (auto& a : alienMgr.all()) {
                 if (!a.active || a.invincibleFrames != 0) continue;
+                int scoreBefore = score;
                 shockwaveMgr.collideWithAlien(a, particleMgr, &audio, score);
+                if (score != scoreBefore) {
+                    bulletMgr.updateParams(score / 30);
+                    shockwaveMgr.updateParams(score / 30);
+                }
             }
 
             // Blue beam hit detection
@@ -2729,6 +2733,7 @@ private:
     void updateBossDefeat(const Uint8* keys) {
         bossDefeatTimer++;
         particleMgr.update();
+        floatingTextMgr.update();
 
         if (bossDefeatTimer < 300) {
             if (bossDefeatTimer % 6 == 0)
@@ -2739,6 +2744,8 @@ private:
         if (bossDefeatTimer == 300) {
             particleMgr.spawnExplosion(boss.getX(), boss.getY(), 120);
             audio.sndExplosionBig();
+            boss.setActive(false);
+            defeatAlienTimer = 0;
         }
 
         if (bossDefeatTimer > 300) {

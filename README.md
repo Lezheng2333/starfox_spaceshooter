@@ -28,7 +28,7 @@ Download the `.zip`, unzip, and run `Shooter.app`.
 
 ```bash
 clang++ -std=c++11 -I/opt/homebrew/include -I/opt/homebrew/include/SDL2 \
-  -D_THREAD_SAFE "space_shooting ver2.0.0 refactored.cpp" -o shooter \
+  -D_THREAD_SAFE "space_shooting ver2.0.0 developing.cpp" -o shooter \
   -L/opt/homebrew/lib -lSDL2
 ```
 
@@ -44,9 +44,9 @@ Requires SDL2: `brew install sdl2`
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
 └── v2.0.0/                                     # 当前开发主线 (v1.1.0+)
-    ├── space_shooting ver2.0.0 refactored.cpp   # OOP 重构版 (开发源码)
+    ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 developing (deprecated).cpp  # 原始代码 (已废弃)
-    ├── Shooter ver1.1.0.app/                   # 最新发布版
+    ├── Shooter ver1.1.0.app/                               # 最新发布版
     └── Shooter ver1.1.0.zip
 ```
 

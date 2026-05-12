@@ -280,6 +280,7 @@ class AudioEngine {
     SDL_AudioDeviceID audioDev;
     int bgmVolume, sfxVolume, eqLow, eqMid, eqHigh;
     bool bossMusicOn;
+    volatile bool ch2Bgm;
     std::vector<ActiveSound> activeSnd;
 
     // BGM state
@@ -288,10 +289,18 @@ class AudioEngine {
     float bgmNoteFreq;
     int bgmNoteLen;
 
+    // Ch2 BGM bass melody state
+    int ch2BassIdx, ch2BassLen;
+    float ch2BassFreq, ch2BassPhase;
+
     static const float BGM_MELODY[32];
     static const int BGM_NOTE_DUR[32];
     static const float BOSS_MELODY[16];
     static const int BOSS_DUR[16];
+    static const float CH2_MELODY[126];
+    static const int CH2_MEL_DUR[126];
+    static const float CH2_BASS[64];
+    static const int CH2_BASS_DUR[64];
 
     static void sdlAudioCB(void* userdata, Uint8* stream, int len) {
         ((AudioEngine*)userdata)->audioCB(stream, len);
@@ -303,39 +312,95 @@ class AudioEngine {
         memset(buf, 0, len);
 
         bool bossFight = bossMusicOn;
-        const float* melodyTbl = bossFight ? BOSS_MELODY : BGM_MELODY;
-        const int*   durTbl    = bossFight ? BOSS_DUR    : BGM_NOTE_DUR;
-        int noteCount = bossFight ? 16 : 32;
-        int tickLen   = bossFight ? 450 : 800;
+        bool isCh2 = ch2Bgm && !bossFight;
 
-        for (int i = 0; i < n; ++i) {
-            if (bgmNoteLen <= 0) {
-                bgmNoteIndex = (bgmNoteIndex + 1) % noteCount;
-                bgmNoteLen = durTbl[bgmNoteIndex] * tickLen;
-                bgmNoteFreq = melodyTbl[bgmNoteIndex];
+        if (isCh2) {
+            // ======== Chapter 2 BGM: Ambient pad style, ~60 BPM, C# major ========
+            const int CH2_TICK = 700;
+            const int CH2_NOTE_COUNT = 126;
+            const int CH2_BASS_COUNT = 64;
+
+            for (int i = 0; i < n; ++i) {
+                // Melody: soft pad envelope (slow attack, full sustain, slow release)
+                if (bgmNoteLen <= 0) {
+                    bgmNoteIndex = (bgmNoteIndex + 1) % CH2_NOTE_COUNT;
+                    bgmNoteLen = CH2_MEL_DUR[bgmNoteIndex] * CH2_TICK;
+                    bgmNoteFreq = CH2_MELODY[bgmNoteIndex];
+                }
+                bgmNoteLen--;
+                float melTotalLen = (float)(CH2_MEL_DUR[bgmNoteIndex] * CH2_TICK);
+                float melT = (float)bgmNoteLen / melTotalLen;
+                float melEnv;
+                if (melT < 0.12f)
+                    melEnv = melT / 0.12f;                      // soft release
+                else if (melT > 0.85f)
+                    melEnv = (1.0f - melT) / 0.15f;             // slow attack
+                else
+                    melEnv = 0.80f;                              // full gentle sustain
+
+                bgmPhase += bgmNoteFreq / 44100.0f;
+                if (bgmPhase > 1.0f) bgmPhase -= 2.0f;
+                float melody = sinf(bgmPhase * 2.0f * M_PI) * melEnv * 0.050f;
+
+                // Bass: deep ambient pad (smooth attack, long sustain)
+                if (ch2BassLen <= 0) {
+                    ch2BassIdx = (ch2BassIdx + 1) % CH2_BASS_COUNT;
+                    ch2BassLen = CH2_BASS_DUR[ch2BassIdx] * CH2_TICK;
+                    ch2BassFreq = CH2_BASS[ch2BassIdx];
+                }
+                ch2BassLen--;
+                float bassTotalLen = (float)(CH2_BASS_DUR[ch2BassIdx] * CH2_TICK);
+                float bassT = (float)ch2BassLen / bassTotalLen;
+                float bassEnv;
+                if (bassT < 0.10f)
+                    bassEnv = bassT / 0.10f;                    // gentle release
+                else if (bassT > 0.80f)
+                    bassEnv = 0.40f + 0.60f * (1.0f - bassT) / 0.20f;  // smooth attack
+                else
+                    bassEnv = 0.85f;                             // warm sustain
+
+                ch2BassPhase += ch2BassFreq / 44100.0f;
+                if (ch2BassPhase > 2.0f) ch2BassPhase -= 2.0f;
+                float bass = sinf(ch2BassPhase * 2.0f * M_PI) * bassEnv * 0.055f;
+
+                buf[i] = (melody + bass) * (bgmVolume * bgmVolume / 70.0f);
+                bgmStepCounter++;
             }
-            bgmNoteLen--;
-            float totalLen = (float)(durTbl[bgmNoteIndex] * tickLen);
-            float t = (float)bgmNoteLen / totalLen;
-            float env = 1.0f;
-            if (t < 0.05f) env = t / 0.05f;
-            else if (t > 0.75f) env = (1.0f - t) / 0.25f;
+        } else {
+            const float* melodyTbl = bossFight ? BOSS_MELODY : BGM_MELODY;
+            const int*   durTbl    = bossFight ? BOSS_DUR    : BGM_NOTE_DUR;
+            int noteCount = bossFight ? 16 : 32;
+            int tickLen   = bossFight ? 450 : 800;
 
-            bgmPhase += bgmNoteFreq / 44100.0f;
-            if (bgmPhase > 1.0f) bgmPhase -= 2.0f;
-            float melodyVol = bossFight ? 0.055f : 0.045f;
-            float melody = sinf(bgmPhase * 2.0f * M_PI) * env * melodyVol;
+            for (int i = 0; i < n; ++i) {
+                if (bgmNoteLen <= 0) {
+                    bgmNoteIndex = (bgmNoteIndex + 1) % noteCount;
+                    bgmNoteLen = durTbl[bgmNoteIndex] * tickLen;
+                    bgmNoteFreq = melodyTbl[bgmNoteIndex];
+                }
+                bgmNoteLen--;
+                float totalLen = (float)(durTbl[bgmNoteIndex] * tickLen);
+                float t = (float)bgmNoteLen / totalLen;
+                float env = 1.0f;
+                if (t < 0.05f) env = t / 0.05f;
+                else if (t > 0.75f) env = (1.0f - t) / 0.25f;
 
-            float bassFreq = bossFight ? 65.0f : 55.0f;
-            float pulseSpeed = bossFight ? 0.0015f : 0.0005f;
-            bgmPulsePhase += bassFreq / 44100.0f;
-            if (bgmPulsePhase > 2.0f) bgmPulsePhase -= 2.0f;
-            float pulse = 0.5f + 0.5f * sinf(bgmStepCounter * pulseSpeed);
-            float bassVol = bossFight ? 0.038f : 0.030f;
-            float bass = sinf(bgmPulsePhase * 2.0f * M_PI) * pulse * bassVol;
+                bgmPhase += bgmNoteFreq / 44100.0f;
+                if (bgmPhase > 1.0f) bgmPhase -= 2.0f;
+                float melodyVol = bossFight ? 0.055f : 0.045f;
+                float melody = sinf(bgmPhase * 2.0f * M_PI) * env * melodyVol;
 
-            buf[i] = (melody + bass) * (bgmVolume * bgmVolume / 70.0f);
-            bgmStepCounter++;
+                float bassFreq = bossFight ? 65.0f : 55.0f;
+                float pulseSpeed = bossFight ? 0.0015f : 0.0005f;
+                bgmPulsePhase += bassFreq / 44100.0f;
+                if (bgmPulsePhase > 2.0f) bgmPulsePhase -= 2.0f;
+                float pulse = 0.5f + 0.5f * sinf(bgmStepCounter * pulseSpeed);
+                float bassVol = bossFight ? 0.038f : 0.030f;
+                float bass = sinf(bgmPulsePhase * 2.0f * M_PI) * pulse * bassVol;
+
+                buf[i] = (melody + bass) * (bgmVolume * bgmVolume / 70.0f);
+                bgmStepCounter++;
+            }
         }
 
         float eqGain[3];
@@ -382,7 +447,9 @@ public:
     AudioEngine() : audioDev(0), bgmVolume(7), sfxVolume(7),
                     eqLow(0), eqMid(0), eqHigh(0), bossMusicOn(false),
                     bgmPhase(0), bgmPulsePhase(0), bgmStepCounter(0),
-                    bgmNoteIndex(0), bgmNoteFreq(0), bgmNoteLen(0) {
+                    bgmNoteIndex(0), bgmNoteFreq(0), bgmNoteLen(0),
+                    ch2Bgm(false),
+                    ch2BassIdx(0), ch2BassLen(0), ch2BassFreq(0), ch2BassPhase(0) {
         SDL_AudioSpec want;
         SDL_memset(&want, 0, sizeof(want));
         want.freq = 44100;
@@ -398,6 +465,7 @@ public:
     ~AudioEngine() { if (audioDev) SDL_CloseAudioDevice(audioDev); }
 
     void setBossMusic(bool on) { bossMusicOn = on; }
+    void setCh2Bgm(bool on) { ch2Bgm = on; }
 
     void playSound(float freq, float sweepEnd, int durMs, float vol, int type, int band) {
         if (!audioDev) return;
@@ -461,6 +529,53 @@ const float AudioEngine::BOSS_MELODY[16] = {
 };
 const int AudioEngine::BOSS_DUR[16] = {
     6,6,4,4,6,6,4,4,  6,4,4,6,8,6,4,8
+};
+
+// Chapter 2 BGM: 32s ambient pad loop — C# major, ~60 BPM
+// 126 melody notes (16th notes) + 64 bass notes (8th notes)
+const float AudioEngine::CH2_MELODY[126] = {
+       0,    0,  415,  415,  277,  415,  277,    0,
+       0,    0,    0,    0,  466,  466,  466,    0,
+     466,  466,  349,  349,  349,  349,  349,  349,
+     349,  349,  466,  466,  311,  311,  466,  466,
+    1047,  349,  349,  349,  156,  156,  156,  156,
+     349,  262,  175,  349,  175,  349,  175,  175,
+       0,    0,    0,    0,  932,  932,  932,    0,
+     932,  932,  932, 1047, 1047, 1047,  349,  349,
+     349,  349,  349, 1047, 1047,  349,  175,  175,
+     175,  175,  932,  932,  932,    0,    0,    0,
+       0,    0,    0, 1047, 1047, 1047,  932,  932,
+     932,  932,  415,  415,  415,  415,  415,  415,
+     415,  415,  175,  175,  175,  175, 1047, 1047,
+    1047,  175,  208,  208,  208,  208,  117,  117,
+     117,  117,  415,  415,  175,  175,    0,    0,
+       0,    0,    0,  415,  415,  277,
+};
+const int AudioEngine::CH2_MEL_DUR[126] = {
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,16,16,
+    16,16,16,16,16,16,16,16, 16,16,16,16,16,16,
+};
+const float AudioEngine::CH2_BASS[64] = {
+     69,  69,  69,  69,  69,  69,  58,  58,
+     58,  58,  65,  65,  65,  65,  69,  69,
+     69,  69,  78,  78,  78,  78,  87,  87,
+     87,  87,  73,  69,  69,  69,  69,  69,
+     87,  87,  87,  87,  87,  87,  69,  69,
+     69,  69,  69,  69,  87,  87,  69,  69,
+     69,  69,  87,  87,  87,  87, 104,  58,
+     58,  58,  69,  69,  69,  69,  69,  69,
+};
+const int AudioEngine::CH2_BASS_DUR[64] = {
+    32,32,32,32,32,32,32,32, 32,32,32,32,32,32,32,32,
+    32,32,32,32,32,32,32,32, 32,32,32,32,32,32,32,32,
+    32,32,32,32,32,32,32,32, 32,32,32,32,32,32,32,32,
+    32,32,32,32,32,32,32,32, 32,32,32,32,32,32,32,32,
 };
 
 // ============== FloatingTextManager ==============
@@ -2329,6 +2444,9 @@ class Game {
     int defeatMCDelay, defeatFadeTimer;
     bool missionCompleteShown, missionComplete;
 
+    // Chapter unlock tracking
+    bool isNormalPlay;
+
     // Timing
     Uint32 lastTime;
 
@@ -2353,6 +2471,7 @@ public:
           bossDefeatTimer(0), defeatAlienTimer(0), defeatReturnTimer(0), defeatFWTimer(0),
           defeatMCDelay(0), defeatFadeTimer(0),
           missionCompleteShown(false), missionComplete(false),
+          isNormalPlay(false),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
           leftWas(false), rightWas(false), lastShockwaveLevel(0), background(nullptr), sideBg(nullptr) {
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
@@ -2411,6 +2530,8 @@ public:
 
             const Uint8* keys = SDL_GetKeyboardState(NULL);
             audio.setBossMusic(phase == PHASE_BOSS_FIGHT && boss.isActive());
+            audio.setCh2Bgm(chapterMgr.getConfig().isSideScrolling &&
+                !atStartScreen && !atChapterSelect && !atTestSelect && !atOptionScreen && !atSoundMenu && !gameOver);
             if (background) background->update();
             if (sideBg) sideBg->update();
 
@@ -2485,6 +2606,7 @@ private:
         if (enterNow && !enterWas) {
             if (startMenuSelection == 0) {
                 resetGame(); atStartScreen = false;
+                isNormalPlay = true;
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
@@ -2541,12 +2663,13 @@ private:
         bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
         bool escNow = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
         if (cJustEntered) { upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow; cJustEntered=false; }
-        if (upNow && !upWas)    chapterSelection = (chapterSelection - 1 + 5) % 5;
-        if (downNow && !downWas) chapterSelection = (chapterSelection + 1) % 5;
+        if (upNow && !upWas)    { do { chapterSelection = (chapterSelection - 1 + 5) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
+        if (downNow && !downWas) { do { chapterSelection = (chapterSelection + 1) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
         if (enterNow && !enterWas) {
             if (chapterMgr.isUnlocked(chapterSelection)) {
                 chapterMgr.selectChapter(chapterSelection);
                 resetGame(); atStartScreen = false; atChapterSelect = false;
+                isNormalPlay = true;
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
@@ -2600,6 +2723,7 @@ private:
                     // Chapter 2: start side-scrolling demo immediately
                     chapterMgr.selectChapter(1);
                     resetGame(); atStartScreen = false; atTestSelect = false;
+                    isNormalPlay = false;
                     alienMgr.applyChapterConfig(chapterMgr.getConfig());
                     bulletMgr.updateParams(0);
                     shockwaveMgr.updateParams(0);
@@ -2614,6 +2738,7 @@ private:
         if (enterNow && !enterWas) {
             atTestSelect = false; tJustEntered = true;
             atStartScreen = false;
+            isNormalPlay = false;
             const int testScores[6] = {30, 60, 90, 120, 150, 180};
             if (testScoreSelection < 6) {
                 score = testScores[testScoreSelection];
@@ -3174,6 +3299,11 @@ private:
                 if (defeatFWTimer >= 120) {
                     missionComplete = true;
                     defeatFadeTimer++;
+                    if (isNormalPlay && defeatFWTimer == 120) {
+                        int cur = chapterMgr.getCurrentIndex();
+                        if (cur < 4 && !chapterMgr.isUnlocked(cur + 1))
+                            chapterMgr.unlockChapter(cur + 1);
+                    }
                 }
             }
         }

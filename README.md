@@ -47,11 +47,10 @@ Requires SDL2: `brew install sdl2`
 │   └── Shooter ver1.0.0.zip
 └── v2.0.0/                                     # 当前开发主线 (v1.2.2)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
-    ├── space_shooting ver2.0.0 developing (deprecated).cpp  # 原始代码 (已废弃)
-    ├── Shooter ver1.1.0.app/                               # v1.1.0
-    ├── Shooter ver1.1.0.zip
-    ├── Shooter ver1.2.2.app/                               # v1.2.2 (最新)
-    └── Shooter ver1.2.2.zip
+    ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
+    └── Release Version/                          # 发布版本
+        ├── Shooter ver1.1.0.app/ + .zip                   # v1.1.0
+        └── Shooter ver1.2.2.app/ + .zip                   # v1.2.2 (最新)
 ```
 
 ## License

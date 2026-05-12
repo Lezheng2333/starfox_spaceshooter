@@ -111,7 +111,7 @@ struct ChapterConfig {
     int skyColorR, skyColorG, skyColorB;
     int starCount;
     float starBrightness;
-    bool hasMeteorShowers, hasMovingBase, hasTimeLimit;
+    bool hasMeteorShowers, hasMovingBase, hasTimeLimit, isSideScrolling;
     int timeLimitSeconds;
 };
 
@@ -323,7 +323,7 @@ class AudioEngine {
 
             bgmPhase += bgmNoteFreq / 44100.0f;
             if (bgmPhase > 1.0f) bgmPhase -= 2.0f;
-            float melodyVol = bossFight ? 0.035f : 0.025f;
+            float melodyVol = bossFight ? 0.055f : 0.045f;
             float melody = sinf(bgmPhase * 2.0f * M_PI) * env * melodyVol;
 
             float bassFreq = bossFight ? 65.0f : 55.0f;
@@ -331,10 +331,10 @@ class AudioEngine {
             bgmPulsePhase += bassFreq / 44100.0f;
             if (bgmPulsePhase > 2.0f) bgmPulsePhase -= 2.0f;
             float pulse = 0.5f + 0.5f * sinf(bgmStepCounter * pulseSpeed);
-            float bassVol = bossFight ? 0.025f : 0.018f;
+            float bassVol = bossFight ? 0.038f : 0.030f;
             float bass = sinf(bgmPulsePhase * 2.0f * M_PI) * pulse * bassVol;
 
-            buf[i] = (melody + bass) * (bgmVolume / 5.0f);
+            buf[i] = (melody + bass) * (bgmVolume * bgmVolume / 70.0f);
             bgmStepCounter++;
         }
 
@@ -366,7 +366,7 @@ class AudioEngine {
                 else
                     smp = sinf(s.phase * 2.0f * M_PI);
 
-                buf[i] += smp * env * s.volume * (sfxVolume / 7.0f) * eqGain[s.band];
+                buf[i] += smp * env * s.volume * (sfxVolume * sfxVolume / 70.0f) * eqGain[s.band];
                 s.samplesLeft--;
             }
         }
@@ -413,27 +413,27 @@ public:
     }
 
     // 预定义 SFX
-    void sndShoot()     { playSound(1200, 600, 28, 0.30f, 3, 2); }
-    void sndHit()       { playSound(350, 0, 35, 0.35f, 1, 1); }
-    void sndExplosionSmall() { playSound(80, 0, 80, 0.40f, 2, 0); }
-    void sndExplosionBig()   { playSound(50, 0, 180, 0.55f, 2, 0); }
-    void sndShockwave() { playSound(60, 150, 250, 0.50f, 3, 0); }
-    void sndShockwaveHit()   { playSound(100, 0, 60, 0.40f, 0, 1); }
-    void sndBossHeal()  { playSound(300, 600, 120, 0.35f, 3, 1); }
-    void sndBossAbsorb() { playSound(200, 80, 200, 0.40f, 3, 0); }
+    void sndShoot()     { playSound(1200, 600, 28, 0.20f, 3, 2); }
+    void sndHit()       { playSound(350, 0, 35, 0.22f, 1, 1); }
+    void sndExplosionSmall() { playSound(80, 0, 80, 0.25f, 2, 0); }
+    void sndExplosionBig()   { playSound(50, 0, 180, 0.35f, 2, 0); }
+    void sndShockwave() { playSound(60, 150, 250, 0.30f, 3, 0); }
+    void sndShockwaveHit()   { playSound(100, 0, 60, 0.25f, 0, 1); }
+    void sndBossHeal()  { playSound(300, 600, 120, 0.22f, 3, 1); }
+    void sndBossAbsorb() { playSound(200, 80, 200, 0.25f, 3, 0); }
     void sndBossEntrance() {
-        playSound(60, 25, 700, 0.55f, 3, 0);
-        playSound(150, 60, 550, 0.40f, 3, 0);
-        playSound(280, 160, 350, 0.28f, 3, 0);
-        playSound(180, 90, 500, 0.30f, 1, 1);
-        playSound(40, 0, 120, 0.45f, 2, 0);
+        playSound(60, 25, 700, 0.35f, 3, 0);
+        playSound(150, 60, 550, 0.25f, 3, 0);
+        playSound(280, 160, 350, 0.18f, 3, 0);
+        playSound(180, 90, 500, 0.20f, 1, 1);
+        playSound(40, 0, 120, 0.30f, 2, 0);
     }
-    void sndBaseDamage() { playSound(45, 0, 150, 0.45f, 2, 0); }
+    void sndBaseDamage() { playSound(45, 0, 150, 0.28f, 2, 0); }
     void sndBossHit() {
-        playSound(280, 0, 28, 0.32f, 1, 2);
-        playSound(80, 0, 35, 0.45f, 1, 0);
+        playSound(280, 0, 28, 0.20f, 1, 2);
+        playSound(80, 0, 35, 0.28f, 1, 0);
     }
-    void sndShake()   { playSound(35, 0, 100, 0.35f, 2, 0); }
+    void sndShake()   { playSound(35, 0, 100, 0.22f, 2, 0); }
 
     int getBgmVolume() const { return bgmVolume; }
     int getSfxVolume() const { return sfxVolume; }
@@ -755,6 +755,18 @@ public:
         beam.active = true; beam.canDamage = false;
         beam.blueBeam = true; beam.beamTargetIndex = targetIdx;
         bullets.push_back(beam);
+    }
+
+    void addBulletSideScroll(const Player& player, AudioEngine* audio) {
+        Bullet b;
+        b.x = (double)player.getX();
+        b.y = (double)player.getY();
+        b.startX = player.getX(); b.startY = player.getY();
+        b.dx = 0.25; b.dy = 0.0;  // unit-ish vector: slower horizontal speed
+        b.active = true; b.canDamage = true;
+        b.blueBeam = false; b.beamTargetIndex = -1;
+        bullets.push_back(b);
+        if (audio) audio->sndShoot();
     }
 
     bool canFire() const { return fireCooldown == 0; }
@@ -1740,6 +1752,294 @@ public:
     }
 };
 
+// ============== SideScrollingBackground ==============
+class SideScrollingBackground {
+private:
+    struct Star2 { double wx, wy; float phase, twinkleSpeed; bool isCross; };
+    struct Pillar { double wx; bool isMajor; };
+
+    std::vector<Star2> stars;
+    std::vector<Pillar> pillars;
+    double scrollX, scrollSpeed, genNext;
+    static constexpr double STAR_PARALLAX = 0.015;
+    static constexpr double PILLAR_SPACING = 330.0; // ~1.5s between pillars
+    static const int VP_X = CENTER_X;    // pillar/glass wall vanishing point x
+    static const int VP_Y = -60;        // pillar/glass wall vanishing point y (above screen)
+    static const int WALL_Y = 280;      // floor meets glass wall
+
+    // Longitudinal floor seams (horizontal lines along corridor, at fixed depths)
+    // Each track = a fixed y position on the floor, seams scroll left at same speed
+    struct SeamTrack {
+        double y;           // fixed screen y for this depth track
+        double spacing;     // world spacing between seams at this depth (near=wider, far=narrower)
+        double genNext;     // next world-x to generate
+        std::vector<double> wxs; // world-x positions of seams
+    };
+    static const int N_SEAM_TRACKS = 5;
+    SeamTrack seamTracks[N_SEAM_TRACKS];
+
+    void genStars() {
+        for (int i = 0; i < 400; ++i) {
+            Star2 s;
+            s.wx = rand() % 6000; s.wy = rand() % WIN_HEIGHT;
+            s.phase = (rand() % 628) / 100.0f;
+            s.twinkleSpeed = 0.008f + (rand() % 50) / 1000.0f;
+            s.isCross = (rand() % 100 < 10);
+            stars.push_back(s);
+        }
+    }
+
+    void genAhead() {
+        double ahead = scrollX + WIN_WIDTH + 300.0; // enough margin for glass+pilars
+        // Pillars
+        while (genNext < ahead) {
+            pillars.push_back({genNext, (int)(genNext / PILLAR_SPACING) % 5 == 0});
+            genNext += PILLAR_SPACING;
+        }
+        // Floor seams per track
+        for (int t = 0; t < N_SEAM_TRACKS; ++t) {
+            while (seamTracks[t].genNext < ahead) {
+                seamTracks[t].wxs.push_back(seamTracks[t].genNext);
+                seamTracks[t].genNext += seamTracks[t].spacing;
+            }
+        }
+    }
+
+    template<typename T>
+    void pruneVec(std::vector<T>& v, double cutoff) {
+        int w = 0;
+        for (int i = 0; i < (int)v.size(); ++i)
+            if (v[i].wx >= cutoff) v[w++] = v[i];
+        v.resize(w);
+    }
+    template<typename T>
+    void pruneDoubleVec(std::vector<T>& v, double cutoff) {
+        int w = 0;
+        for (int i = 0; i < (int)v.size(); ++i)
+            if (v[i] >= cutoff) v[w++] = v[i];
+        v.resize(w);
+    }
+    void pruneBehind() {
+        double cutoff = scrollX - 500.0;
+        pruneVec(pillars, cutoff);
+        for (int t = 0; t < N_SEAM_TRACKS; ++t)
+            pruneDoubleVec(seamTracks[t].wxs, cutoff);
+    }
+
+    void pruneStars() {
+        double cutoff = scrollX * STAR_PARALLAX - 200.0;
+        double wrap = scrollX * STAR_PARALLAX + WIN_WIDTH + 200.0;
+        for (auto& s : stars) {
+            if (s.wx < cutoff) { s.wx += 6000.0; s.phase = (rand() % 628) / 100.0f; }
+            if (s.wx > wrap) { s.wx -= 6000.0; }
+        }
+    }
+
+public:
+    SideScrollingBackground() : scrollX(0), scrollSpeed(3.5), genNext(-200.0) {
+        genStars();
+        for (int t = 0; t < N_SEAM_TRACKS; ++t) {
+            double frac = (double)(t + 1) / (N_SEAM_TRACKS + 1);
+            seamTracks[t].y = WALL_Y + (WIN_HEIGHT - WALL_Y) * frac * frac;
+            seamTracks[t].spacing = 45.0 + t * 22.0;
+            seamTracks[t].genNext = -200.0;
+        }
+    }
+    void reset() {
+        scrollX = 0; scrollSpeed = 3.5; genNext = -200.0;
+        pillars.clear(); stars.clear(); genStars();
+        for (int t = 0; t < N_SEAM_TRACKS; ++t) {
+            seamTracks[t].wxs.clear();
+            seamTracks[t].genNext = -200.0;
+        }
+    }
+    void setSpeed(double s) { scrollSpeed = s; }
+    double getScrollX() const { return scrollX; }
+
+    void update() {
+        scrollX += scrollSpeed;
+        for (auto& s : stars) {
+            s.phase += s.twinkleSpeed;
+            if (s.phase > 2.0f * M_PI) s.phase -= 2.0f * M_PI;
+        }
+        pruneStars();
+        genAhead();
+        pruneBehind();
+    }
+
+    void draw(SDL_Renderer* r) {
+        drawSky(r);
+        drawFloor(r);
+        drawGlassPanels(r);
+        drawPillars(r);
+    }
+
+private:
+    void drawSky(SDL_Renderer* r) {
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_Rect bg = {0, 0, WIN_WIDTH, WIN_HEIGHT};
+        SDL_RenderFillRect(r, &bg);
+        for (const auto& s : stars) {
+            int sx = (int)(s.wx - scrollX * STAR_PARALLAX);
+            int sy = (int)s.wy;
+            if (sx < -20 || sx > WIN_WIDTH + 20) continue;
+            float bright = 0.35f + 0.65f * std::fabs(std::sin(s.phase));
+            int b = (int)(bright * 240); if (b < 40) b = 40; if (b > 255) b = 255;
+            SDL_SetRenderDrawColor(r, b, b, b, 255);
+            SDL_RenderDrawPoint(r, sx, sy);
+            if (s.isCross && bright > 0.6f) {
+                int cb = (int)(bright * 160); if (cb > 160) cb = 160;
+                SDL_SetRenderDrawColor(r, cb, cb, cb, 255);
+                int len = (bright > 0.82f) ? 4 : 2;
+                SDL_RenderDrawLine(r, sx - len, sy, sx + len, sy);
+                SDL_RenderDrawLine(r, sx, sy - len, sx, sy + len);
+            }
+        }
+    }
+
+    // ======== FLOOR ========
+    void drawFloor(SDL_Renderer* r) {
+        // Floor fill
+        SDL_SetRenderDrawColor(r, 22, 24, 30, 255);
+        SDL_Rect floorRect = {0, WALL_Y, WIN_WIDTH, WIN_HEIGHT - WALL_Y};
+        SDL_RenderFillRect(r, &floorRect);
+
+        // Longitudinal floor seams (horizontal lines along corridor, at fixed depths)
+        // Each track has a fixed y, seams scroll left at same speed as pillars
+        for (int t = 0; t < N_SEAM_TRACKS; ++t) {
+            int y = (int)seamTracks[t].y;
+            int alpha = 180 - t * 22; // nearer = brighter
+            SDL_SetRenderDrawColor(r, 45, 48, 58, alpha);
+            for (double wx : seamTracks[t].wxs) {
+                double sx = wx - scrollX;
+                if (sx < -40 || sx > WIN_WIDTH + 40) continue;
+                // Each seam is a short horizontal dash at its fixed y
+                int halfW = 15 + t * 8; // wider near camera
+                SDL_RenderDrawLine(r, (int)sx - halfW, y, (int)sx + halfW, y);
+            }
+        }
+
+        // Horizon junction line (where floor meets glass wall)
+        SDL_SetRenderDrawColor(r, 35, 38, 45, 255);
+        SDL_RenderDrawLine(r, 0, WALL_Y, WIN_WIDTH, WALL_Y);
+        SDL_SetRenderDrawColor(r, 55, 58, 68, 255);
+        SDL_RenderDrawLine(r, 0, WALL_Y + 2, WIN_WIDTH, WALL_Y + 2);
+    }
+
+    // ======== GLASS PANELS ========
+    void pillarScreenX(const Pillar& p, double& botX, double& topX) const {
+        botX = p.wx - scrollX;
+        topX = VP_X + (botX - VP_X) * 0.85;
+    }
+
+    void drawGlassPanels(SDL_Renderer* r) {
+        for (size_t i = 0; i + 1 < pillars.size(); ++i) {
+            double lbx, ltx, rbx, rtx;
+            pillarScreenX(pillars[i], lbx, ltx);
+            pillarScreenX(pillars[i+1], rbx, rtx);
+            double glassT = 0, glassB = WALL_Y;
+
+            // Cull only if ENTIRE pane is off-screen
+            double minX = std::min(std::min(lbx, ltx), std::min(rbx, rtx));
+            double maxX = std::max(std::max(lbx, ltx), std::max(rbx, rtx));
+            if (maxX < -100 || minX > WIN_WIDTH + 100) continue;
+
+            // Border colour
+            SDL_SetRenderDrawColor(r, 170, 200, 230, 95);
+            // Left edge (follows pillar angle)
+            SDL_RenderDrawLine(r, (int)lbx, (int)glassB, (int)ltx, (int)glassT);
+            // Right edge
+            SDL_RenderDrawLine(r, (int)rbx, (int)glassB, (int)rtx, (int)glassT);
+            // Top edge
+            SDL_RenderDrawLine(r, (int)ltx, (int)glassT, (int)rtx, (int)glassT);
+            // Bottom edge
+            SDL_RenderDrawLine(r, (int)lbx, (int)glassB, (int)rbx, (int)glassB);
+
+            // Internal horizontal seams (2-3 subtle lines, Minecraft pane style)
+            SDL_SetRenderDrawColor(r, 165, 195, 225, 55);
+            for (int hi = 1; hi <= 3; ++hi) {
+                double t = (double)hi / 4.0;
+                int ly = (int)(glassT + (glassB - glassT) * t);
+                int lx = (int)(ltx + (lbx - ltx) * t);
+                int rx = (int)(rtx + (rbx - rtx) * t);
+                SDL_RenderDrawLine(r, lx, ly, rx, ly);
+            }
+
+            // Internal vertical seams (1-2 subtle lines)
+            for (int vi = 1; vi <= 2; ++vi) {
+                double t = (double)vi / 3.0;
+                int bx = (int)(lbx + (rbx - lbx) * t);
+                int tx = (int)(ltx + (rtx - ltx) * t);
+                SDL_RenderDrawLine(r, bx, (int)glassB, tx, (int)glassT);
+            }
+
+            // Corner highlights (Minecraft signature)
+            SDL_SetRenderDrawColor(r, 220, 235, 255, 130);
+            // Top-left corner
+            SDL_RenderDrawLine(r, (int)ltx, (int)glassT, (int)ltx + 6, (int)glassT);
+            SDL_RenderDrawLine(r, (int)ltx, (int)glassT, (int)ltx, (int)glassT + 6);
+            // Top-right corner
+            SDL_RenderDrawLine(r, (int)rtx, (int)glassT, (int)rtx - 6, (int)glassT);
+            SDL_RenderDrawLine(r, (int)rtx, (int)glassT, (int)rtx, (int)glassT + 6);
+            // Bottom-left corner
+            SDL_RenderDrawLine(r, (int)lbx, (int)glassB, (int)lbx + 6, (int)glassB);
+            SDL_RenderDrawLine(r, (int)lbx, (int)glassB, (int)lbx, (int)glassB - 6);
+            // Bottom-right corner
+            SDL_RenderDrawLine(r, (int)rbx, (int)glassB, (int)rbx - 6, (int)glassB);
+            SDL_RenderDrawLine(r, (int)rbx, (int)glassB, (int)rbx, (int)glassB - 6);
+
+            // Center sheen (subtle diagonal glow)
+            double cx = (ltx + rtx + lbx + rbx) * 0.25;
+            double cy = glassB * 0.35;
+            SDL_SetRenderDrawColor(r, 200, 225, 250, 45);
+            SDL_RenderDrawLine(r, (int)(cx - 15), (int)(cy - 8), (int)(cx + 10), (int)(cy + 6));
+        }
+    }
+
+    // ======== PILLARS ========
+    void drawPillars(SDL_Renderer* r) {
+        for (const auto& p : pillars) {
+            double sx = p.wx - scrollX;
+            if (sx < -120 || sx > WIN_WIDTH + 120) continue; // full off-screen cull
+
+            double botX = sx;
+            double botY = WALL_Y;
+            // Top leans slightly toward vanishing point (above screen)
+            double topX = VP_X + (botX - VP_X) * 0.85;
+            double topY = 0;
+
+            int pw = p.isMajor ? 5 : 3;
+            double dx = topX - botX, dy = topY - botY;
+            double len = std::sqrt(dx*dx + dy*dy);
+            if (len < 1.0) continue;
+            double nx = -dy / len, ny = dx / len;
+
+            // Pillar body
+            SDL_SetRenderDrawColor(r, 55, 55, 65, 230);
+            for (int w = -pw; w <= pw; ++w) {
+                int x0 = (int)(botX + nx * w), y0 = (int)(botY + ny * w);
+                int x1 = (int)(topX + nx * w), y1 = (int)(topY + ny * w);
+                SDL_RenderDrawLine(r, x0, y0, x1, y1);
+            }
+
+            // Highlight edges
+            SDL_SetRenderDrawColor(r, 80, 90, 120, 180);
+            SDL_RenderDrawLine(r, (int)(botX+nx*pw), (int)(botY+ny*pw),
+                               (int)(topX+nx*pw), (int)(topY+ny*pw));
+            SDL_SetRenderDrawColor(r, 110, 120, 145, 180);
+            SDL_RenderDrawLine(r, (int)(botX-nx*pw), (int)(botY-ny*pw),
+                               (int)(topX-nx*pw), (int)(topY-ny*pw));
+
+            // Gusset
+            int gs = pw + 3;
+            SDL_SetRenderDrawColor(r, 65, 65, 75, 180);
+            SDL_RenderDrawLine(r, (int)(botX-nx*gs), (int)(botY-ny*gs), (int)botX, (int)botY + 6);
+            SDL_RenderDrawLine(r, (int)(botX+nx*gs), (int)(botY+ny*gs), (int)botX, (int)botY + 6);
+            SDL_RenderDrawLine(r, (int)(botX-nx*gs), (int)(botY-ny*gs), (int)(botX+nx*gs), (int)(botY+ny*gs));
+        }
+    }
+};
+
 // ============== ChapterManager ==============
 class ChapterManager {
     int currentIdx;
@@ -1772,6 +2072,7 @@ class ChapterManager {
         chapters[idx].hasMeteorShowers = false;
         chapters[idx].hasMovingBase = false;
         chapters[idx].hasTimeLimit = false;
+        chapters[idx].isSideScrolling = false;
         chapters[idx].timeLimitSeconds = 0;
     }
 
@@ -1788,6 +2089,7 @@ public:
         BossConfig bc2 = {1500, 150.0, 30.0, 0.028, 85.0, 140, 65, 50, 380, 30, 60, true, true};
         initChapter(1, "DEEP SPACE", false, 100, 2.0, 6, 65.0, 3, 11, 220,
                    bc2, 200, 60,60,80, 40,40,60, 120, 1.0f);
+        chapters[1].isSideScrolling = true;
 
         // Chapter 3: 敌人更肉、治疗波更强
         BossConfig bc3 = {2000, 160.0, 35.0, 0.030, 90.0, 130, 60, 60, 360, 50, 70, true, true};
@@ -2013,6 +2315,8 @@ class Game {
     // Menu state
     int startMenuSelection, testScoreSelection, chapterSelection, menuSelection;
     int pauseMenuSelection, optionCursor;
+    int testChapterSelection;
+    bool testAtChapterSelect;
 
     // Countdown
     int countdown, countdownFrame;
@@ -2034,6 +2338,7 @@ class Game {
 
     // Background (per chapter, persistent)
     Background* background;
+    SideScrollingBackground* sideBg;
 
 public:
     Game(Renderer& r, AudioEngine& a, SDL_Window* w)
@@ -2043,15 +2348,16 @@ public:
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
           atOptionScreen(false), atSoundMenu(false), optionFromPause(false), optionJustEntered(true),
           startMenuSelection(0), testScoreSelection(0), chapterSelection(0), menuSelection(0),
-          pauseMenuSelection(0), optionCursor(0),
+          pauseMenuSelection(0), optionCursor(0), testChapterSelection(0), testAtChapterSelect(true),
           countdown(-1), countdownFrame(0), soundCursor(0),
           bossDefeatTimer(0), defeatAlienTimer(0), defeatReturnTimer(0), defeatFWTimer(0),
           defeatMCDelay(0), defeatFadeTimer(0),
           missionCompleteShown(false), missionComplete(false),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
-          leftWas(false), rightWas(false), lastShockwaveLevel(0), background(nullptr) {
+          leftWas(false), rightWas(false), lastShockwaveLevel(0), background(nullptr), sideBg(nullptr) {
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         background = new Background(chapterMgr.getConfig());
+        sideBg = new SideScrollingBackground();
     }
 
     void resetGame() {
@@ -2065,6 +2371,8 @@ public:
         menuSelection = 0;
         startMenuSelection = 0;
         testScoreSelection = 0;
+        testChapterSelection = 0;
+        testAtChapterSelect = true;
         chapterSelection = 0;
         pauseMenuSelection = 0;
         difficultyTimer = 0;
@@ -2086,6 +2394,7 @@ public:
         countdown = -1; countdownFrame = 0;
         soundCursor = 0;
         if (background) { delete background; background = new Background(chapterMgr.getConfig()); }
+        if (sideBg) sideBg->reset();
     }
 
     void run() {
@@ -2103,6 +2412,7 @@ public:
             const Uint8* keys = SDL_GetKeyboardState(NULL);
             audio.setBossMusic(phase == PHASE_BOSS_FIGHT && boss.isActive());
             if (background) background->update();
+            if (sideBg) sideBg->update();
 
             // ======== Esc key global ========
             if (escPressed && !gameOver && !atStartScreen && !atTestSelect && !atChapterSelect
@@ -2184,7 +2494,8 @@ private:
                 chapterSelection = 0; sJustEntered = true;
             } else if (startMenuSelection == 2) {
                 atStartScreen = false; atTestSelect = true;
-                testScoreSelection = 0; sJustEntered = true;
+                testScoreSelection = 0; testChapterSelection = 0;
+                testAtChapterSelect = true; sJustEntered = true;
             } else if (startMenuSelection == 3) {
                 atStartScreen = false; atOptionScreen = true;
                 optionFromPause = false; optionCursor = 0;
@@ -2277,10 +2588,29 @@ private:
         bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
         bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
         bool escNow = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
-        if (escNow) { atTestSelect = false; atStartScreen = true; tJustEntered = true; return; }
-        if (tJustEntered) { upWas=upNow; downWas=downNow; enterWas=enterNow; tJustEntered=false; }
-        if (upNow && !upWas)     testScoreSelection = (testScoreSelection - 1 + 9) % 9;
-        if (downNow && !downWas) testScoreSelection = (testScoreSelection + 1) % 9;
+        if (tJustEntered) { upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow; tJustEntered=false; return; }
+        if (testAtChapterSelect) {
+            // Level 1: Chapter selection
+            if (escNow && !escWas) { atTestSelect = false; atStartScreen = true; tJustEntered = true; }
+            if (upNow && !upWas)       testChapterSelection = (testChapterSelection - 1 + 5) % 5;
+            if (downNow && !downWas)   testChapterSelection = (testChapterSelection + 1) % 5;
+            if (enterNow && !enterWas) {
+                if (testChapterSelection == 0) { testAtChapterSelect = false; tJustEntered = true; }
+                else if (testChapterSelection == 1) {
+                    // Chapter 2: start side-scrolling demo immediately
+                    chapterMgr.selectChapter(1);
+                    resetGame(); atStartScreen = false; atTestSelect = false;
+                    alienMgr.applyChapterConfig(chapterMgr.getConfig());
+                    bulletMgr.updateParams(0);
+                    shockwaveMgr.updateParams(0);
+                    tJustEntered = true;
+                }
+            }
+        } else {
+            // Level 2: Score/target selection for selected chapter
+            if (escNow && !escWas) { testAtChapterSelect = true; tJustEntered = true; }
+            if (upNow && !upWas)     testScoreSelection = (testScoreSelection - 1 + 9) % 9;
+            if (downNow && !downWas) testScoreSelection = (testScoreSelection + 1) % 9;
         if (enterNow && !enterWas) {
             atTestSelect = false; tJustEntered = true;
             atStartScreen = false;
@@ -2355,27 +2685,54 @@ private:
                 shockwaveMgr.setPending(true);
             }
         }
-        upWas=upNow; downWas=downNow; enterWas=enterNow;
+    }
+        upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow;
     }
 
     void drawTestScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
         if (background) background->drawStars(r);
-        font.drawString(r, "SELECT SCORE", CENTER_X - 144, 50, 4);
-        SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
-        SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
-        const char* testLabels[9] = {"30", "60", "90", "120", "150", "180", "200 BOSS", "BOSS PH.2", "BOSS 1HP"};
-        const int MENU_Y0 = 130, GAP = 48;
-        for (int i = 0; i < 9; ++i) {
-            int itemW = (int)strlen(testLabels[i]) * 6 * 3;
-            int itemX = CENTER_X - itemW / 2;
-            int itemY = MENU_Y0 + i * GAP;
-            font.drawString(r, testLabels[i], itemX, itemY, 3);
-            if (i == testScoreSelection) {
-                UIRenderer::drawMenuCursor(r, itemX - 24, itemY + 10, 10);
-                UIRenderer::drawMenuUnderline(r, itemX, itemY + 24, itemW);
+
+        if (testAtChapterSelect) {
+            // Level 1: Chapter selection
+            font.drawString(r, "TEST - SELECT CHAPTER", CENTER_X - 234, 60, 4);
+            SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
+            SDL_RenderDrawLine(r, CENTER_X - 180, 100, CENTER_X + 180, 100);
+            const char* chLabels[5] = {"CHAPTER 1", "CHAPTER 2", "CHAPTER 3", "CHAPTER 4", "CHAPTER 5"};
+            const int Y0 = 150, GAP = 55;
+            for (int i = 0; i < 5; ++i) {
+                int itemW = (int)strlen(chLabels[i]) * 6 * 3;
+                int itemX = CENTER_X - itemW / 2;
+                int itemY = Y0 + i * GAP;
+                bool locked = (i > 1); // Chapter 1 & 2 unlocked for testing
+                SDL_SetRenderDrawColor(r, locked ? 80 : 255, locked ? 80 : 255, locked ? 80 : 255, 255);
+                font.drawString(r, chLabels[i], itemX, itemY, 3);
+                if (i == testChapterSelection) {
+                    UIRenderer::drawMenuCursor(r, itemX - 24, itemY + 10, 10);
+                    UIRenderer::drawMenuUnderline(r, itemX, itemY + 24, itemW);
+                }
+                if (locked) font.drawString(r, "(LOCKED)", itemX + itemW + 10, itemY, 2);
             }
+            font.drawString(r, "W/S:select  ENTER:enter  ESC:back", CENTER_X - 216, 490, 2);
+        } else {
+            // Level 2: Score selection
+            font.drawString(r, "TEST - CHAPTER 1", CENTER_X - 192, 50, 4);
+            SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
+            SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
+            const char* testLabels[9] = {"30", "60", "90", "120", "150", "180", "200 BOSS", "BOSS PH.2", "BOSS 1HP"};
+            const int MENU_Y0 = 130, GAP = 48;
+            for (int i = 0; i < 9; ++i) {
+                int itemW = (int)strlen(testLabels[i]) * 6 * 3;
+                int itemX = CENTER_X - itemW / 2;
+                int itemY = MENU_Y0 + i * GAP;
+                font.drawString(r, testLabels[i], itemX, itemY, 3);
+                if (i == testScoreSelection) {
+                    UIRenderer::drawMenuCursor(r, itemX - 24, itemY + 10, 10);
+                    UIRenderer::drawMenuUnderline(r, itemX, itemY + 24, itemW);
+                }
+            }
+            font.drawString(r, "W/S:select  ENTER:start  ESC:back", CENTER_X - 210, 490, 2);
         }
     }
 
@@ -2506,6 +2863,25 @@ private:
 
     // ======== GAMEPLAY UPDATE ========
     void updateGameplay(const Uint8* keys) {
+        bool isSide = chapterMgr.getConfig().isSideScrolling;
+        if (isSide) {
+            // Side-scrolling update (Chapter 2 demo)
+            bool moveLeft  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
+            bool moveRight = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
+            bool moveUp    = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
+            bool moveDown  = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+            int px = player.getX(), py = player.getY();
+            if (moveLeft)  px -= 6;
+            if (moveRight) px += 6;
+            if (moveUp)    py -= 6;
+            if (moveDown)  py += 6;
+            if (px < 60) px = 60; if (px > 250) px = 250;
+            if (py < 50) py = 50; if (py > WIN_HEIGHT - 80) py = WIN_HEIGHT - 80;
+            player.setX(px); player.setY(py);
+            floatingTextMgr.update();
+            return;
+        }
+
         if (phase != PHASE_BOSS_DEFEAT) {
             // Boss trigger
             if (score >= chapterMgr.getConfig().bossTriggerScore && phase == PHASE_PLAY) {
@@ -2817,6 +3193,7 @@ private:
 
     // ======== DRAW GAMEPLAY ========
     void drawGameplayFrame() {
+        bool isSide = chapterMgr.getConfig().isSideScrolling;
         bool useShake = (boss.getShakeTimer() > 0);
         if (useShake) {
             shakeTex = SDL_CreateTexture(renderer.get(), SDL_PIXELFORMAT_RGBA8888,
@@ -2827,24 +3204,31 @@ private:
         renderer.clear();
 
         if (!gameOver) {
-            if (background) {
+            if (isSide && sideBg) {
+                sideBg->draw(renderer.get());
+            } else if (background) {
                 background->drawBackground(renderer.get());
                 background->drawBase(renderer.get());
             }
 
-            for (const auto& sw : shockwaveMgr.all()) if (sw.active) shockwaveMgr.draw(renderer.get());
+            if (!isSide) {
+                for (const auto& sw : shockwaveMgr.all()) if (sw.active) shockwaveMgr.draw(renderer.get());
+            }
             particleMgr.draw(renderer.get());
-            alienMgr.draw(renderer.get());
-            bulletMgr.draw(renderer.get());
-            drawPlane();
+            if (!isSide) {
+                alienMgr.draw(renderer.get());
+                bulletMgr.draw(renderer.get());
+            }
+            if (isSide) drawPlaneFlat();
+            else drawPlane();
 
             // Floating texts
             drawFloatingTexts();
 
             // Aim assist
-            if (aimAssistOn) drawAimAssist();
+            if (!isSide && aimAssistOn) drawAimAssist();
 
-            if (boss.isActive()) {
+            if (!isSide && boss.isActive()) {
                 if (phase == PHASE_BOSS_PHASE2) boss.drawCircularShockwave(renderer.get());
                 boss.drawHealWaves(renderer.get());
                 boss.drawBody(renderer.get());
@@ -2853,7 +3237,9 @@ private:
 
             drawScoreHUD();
         } else {
-            if (background) {
+            if (isSide && sideBg) {
+                sideBg->draw(renderer.get());
+            } else if (background) {
                 background->drawBackground(renderer.get());
                 background->drawBase(renderer.get());
             }
@@ -2947,6 +3333,29 @@ private:
         SDL_RenderDrawLine(r, rw1.x, rw1.y, rw2.x, rw2.y);
         SDL_Point tail1 = hr(0, 6), tail2 = hr(0, 12);
         SDL_RenderDrawLine(r, tail1.x, tail1.y, tail2.x, tail2.y);
+    }
+
+    void drawPlaneFlat() {
+        // Chapter 1 plane shape rotated 90° (nose right, centerline horizontal)
+        SDL_Renderer* r = renderer.get();
+        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+        int px = player.getX(), py = player.getY();
+        // Original Chapter 1 coords rotated: (lx,ly)→(-ly,lx)
+        // nose(0,-12)→(12,0)  leftBody(-10,6)→(-6,-10)  rightBody(10,6)→(-6,10)
+        SDL_Point bodyPts[4] = {
+            {px + 12, py},       // nose
+            {px - 6, py - 10},   // left body
+            {px - 6, py + 10},   // right body
+            {px + 12, py}        // back to nose
+        };
+        SDL_RenderDrawLines(r, bodyPts, 4);
+        SDL_RenderDrawLine(r, px - 6, py - 10, px - 6, py + 10); // body rear
+        // Left wing: (-6,0)→(-14,4) rotated→(0,-6)→(-4,-14)
+        SDL_RenderDrawLine(r, px + 0, py - 6, px - 4, py - 14);
+        // Right wing: (6,0)→(14,4) rotated→(0,6)→(-4,14)
+        SDL_RenderDrawLine(r, px + 0, py + 6, px - 4, py + 14);
+        // Tail: (0,6)→(0,12) rotated→(-6,0)→(-12,0)
+        SDL_RenderDrawLine(r, px - 6, py, px - 12, py);
     }
 
     void drawAimAssist() {

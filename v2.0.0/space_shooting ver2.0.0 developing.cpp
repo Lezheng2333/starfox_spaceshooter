@@ -92,6 +92,7 @@ struct BossConfig {
     int enterDuration, absorbDuration, bonusHpPerAlien;
     int healWaveInterval, healHpPerWave, shakeDuration;
     bool hasHealWaves, hasPhase2;
+    const char* name;
 };
 
 struct ChapterConfig {
@@ -483,8 +484,15 @@ public:
     // 预定义 SFX
     void sndShoot()     { playSound(1200, 600, 28, 0.20f, 3, 2); }
     void sndHit()       { playSound(350, 0, 35, 0.22f, 1, 1); }
-    void sndExplosionSmall() { playSound(80, 0, 80, 0.25f, 2, 0); }
-    void sndExplosionBig()   { playSound(50, 0, 180, 0.35f, 2, 0); }
+    void sndExplosionSmall() {
+        playSound(600, 0, 35, 0.16f, 2, 2);    // high crisp noise crack
+        playSound(1400, 0, 16, 0.09f, 0, 2);   // sine tap for "snap"
+    }
+    void sndExplosionBig()   {
+        playSound(500, 0, 48, 0.19f, 2, 2);    // layered high noise
+        playSound(200, 0, 40, 0.14f, 2, 1);    // mid noise fill
+        playSound(1800, 400, 22, 0.10f, 3, 2); // quick high sweep (shattering)
+    }
     void sndShockwave() { playSound(60, 150, 250, 0.30f, 3, 0); }
     void sndShockwaveHit()   { playSound(100, 0, 60, 0.25f, 0, 1); }
     void sndBossHeal()  { playSound(300, 600, 120, 0.22f, 3, 1); }
@@ -1751,11 +1759,15 @@ public:
         if (borderW < BAR_W + 2) borderW = BAR_W + 2;
         SDL_Rect border = {BAR_X-1, BAR_Y-1, borderW, BAR_H+2};
         SDL_RenderDrawRect(renderer, &border);
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-        font.drawChar(renderer, 'B', BAR_X - 40, BAR_Y + 1, 2);
-        font.drawChar(renderer, 'O', BAR_X - 28, BAR_Y + 1, 2);
-        font.drawChar(renderer, 'S', BAR_X - 16, BAR_Y + 1, 2);
-        font.drawChar(renderer, 'S', BAR_X - 4, BAR_Y + 1, 2);
+        if (cfg && cfg->name) {
+            int nameLen = (int)strlen(cfg->name);
+            int namePxW = nameLen * 6 * 2;  // font size 2, each char 12px
+            int nameX = BAR_X - namePxW - 8;
+            for (int i = 0; cfg->name[i]; ++i) {
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+                font.drawChar(renderer, cfg->name[i], nameX + i * 12, BAR_Y + 1, 2);
+            }
+        }
     }
 
     // Writable refs for game loop
@@ -2196,30 +2208,22 @@ public:
         for (int i = 0; i < 5; ++i) unlocked[i] = (i == 0);
 
         // Chapter 1: 默认参数（与当前游戏一致）
-        BossConfig bc1 = {1000, 140.0, 25.0, 0.025, 80.0, 150, 70, 50, 420, 30, 60, true, true};
+        BossConfig bc1 = {1000, 140.0, 25.0, 0.025, 80.0, 150, 70, 50, 420, 30, 60, true, true, "TELAMONDO"};
         initChapter(0, "FIRST FLIGHT", true, 110, 1.75, 7, 60.0, 3, 12, 200,
                    bc1, 200, 80,80,80, 50,50,50, 100, 1.0f);
 
-        // Chapter 2: 更快敌人，更高Boss血量
-        BossConfig bc2 = {1500, 150.0, 30.0, 0.028, 85.0, 140, 65, 50, 380, 30, 60, true, true};
+        // Chapter 2: 侧滚廊桥 (Boss待设计，暂用Ch1配置)
         initChapter(1, "DEEP SPACE", false, 100, 2.0, 6, 65.0, 3, 11, 220,
-                   bc2, 200, 60,60,80, 40,40,60, 120, 1.0f);
+                   bc1, 200, 60,60,80, 40,40,60, 120, 1.0f);
         chapters[1].isSideScrolling = true;
 
-        // Chapter 3: 敌人更肉、治疗波更强
-        BossConfig bc3 = {2000, 160.0, 35.0, 0.030, 90.0, 130, 60, 60, 360, 50, 70, true, true};
+        // Chapters 3-5: Boss待设计，暂用Ch1配置
         initChapter(2, "ENEMY FORTRESS", false, 90, 2.25, 6, 65.0, 4, 10, 250,
-                   bc3, 200, 40,60,40, 30,40,30, 130, 1.0f);
-
-        // Chapter 4: 高速敌人、Boss移动更快
-        BossConfig bc4 = {2500, 170.0, 40.0, 0.033, 95.0, 120, 55, 60, 330, 50, 70, true, true};
+                   bc1, 200, 40,60,40, 30,40,30, 130, 1.0f);
         initChapter(3, "ASTEROID BELT", false, 80, 2.5, 5, 70.0, 4, 9, 250,
-                   bc4, 200, 70,50,30, 50,40,30, 140, 1.0f);
-
-        // Chapter 5: 终极挑战
-        BossConfig bc5 = {3000, 180.0, 45.0, 0.035, 100.0, 100, 50, 70, 300, 60, 80, true, true};
+                   bc1, 200, 70,50,30, 50,40,30, 140, 1.0f);
         initChapter(4, "FINAL ASSAULT", false, 70, 2.75, 5, 75.0, 5, 8, 280,
-                   bc5, 200, 60,30,30, 35,25,25, 150, 1.0f);
+                   bc1, 200, 60,30,30, 35,25,25, 150, 1.0f);
     }
 
     void selectChapter(int idx) { currentIdx = idx; }
@@ -2447,6 +2451,11 @@ class Game {
     // Chapter unlock tracking
     bool isNormalPlay;
 
+    // Ch2 energy barrier (right wall only)
+    int wallFlashTimer;
+    int wallContactY;      // Y position where plane touched the barrier
+    int wallAnimFrame;     // animates lightning/sparks while touching
+
     // Timing
     Uint32 lastTime;
 
@@ -2472,6 +2481,7 @@ public:
           defeatMCDelay(0), defeatFadeTimer(0),
           missionCompleteShown(false), missionComplete(false),
           isNormalPlay(false),
+          wallFlashTimer(0), wallContactY(0), wallAnimFrame(0),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
           leftWas(false), rightWas(false), lastShockwaveLevel(0), background(nullptr), sideBg(nullptr) {
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
@@ -2508,6 +2518,7 @@ public:
         phase = PHASE_PLAY;
         paused = false;
         missionComplete = false; missionCompleteShown = false;
+        wallFlashTimer = 0; wallContactY = 0; wallAnimFrame = 0;
         bossDefeatTimer = 0; defeatAlienTimer = 0; defeatReturnTimer = 0;
         defeatFWTimer = 0; defeatMCDelay = 0; defeatFadeTimer = 0;
         countdown = -1; countdownFrame = 0;
@@ -2652,7 +2663,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.1.0", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.4", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -2718,7 +2729,7 @@ private:
             if (upNow && !upWas)       testChapterSelection = (testChapterSelection - 1 + 5) % 5;
             if (downNow && !downWas)   testChapterSelection = (testChapterSelection + 1) % 5;
             if (enterNow && !enterWas) {
-                if (testChapterSelection == 0) { testAtChapterSelect = false; tJustEntered = true; }
+                if (testChapterSelection == 0) { chapterMgr.selectChapter(0); testAtChapterSelect = false; tJustEntered = true; }
                 else if (testChapterSelection == 1) {
                     // Chapter 2: start side-scrolling demo immediately
                     chapterMgr.selectChapter(1);
@@ -3000,8 +3011,21 @@ private:
             if (moveRight) px += 6;
             if (moveUp)    py -= 6;
             if (moveDown)  py += 6;
-            if (px < 60) px = 60; if (px > 250) px = 250;
-            if (py < 50) py = 50; if (py > WIN_HEIGHT - 80) py = WIN_HEIGHT - 80;
+            // Boundaries: right energy barrier, others simple clamp
+            if (px < 10) px = 10;
+            if (py < 10) py = 10;
+            if (py > WIN_HEIGHT - 10) py = WIN_HEIGHT - 10;
+
+            if (px > 630) {
+                px = 630;
+                wallFlashTimer = 28;  // full brightness while touching
+                wallContactY = py;   // follow plane Y
+                wallAnimFrame++;     // animate lightning/sparks
+            } else if (wallFlashTimer > 0) {
+                wallFlashTimer--;     // fade when released
+                wallAnimFrame++;
+            }
+
             player.setX(px); player.setY(py);
             floatingTextMgr.update();
             return;
@@ -3131,12 +3155,13 @@ private:
                     double ax = perspLeft(a.y) + a.t * perspWidth(a.y);
                     double dx = b.x - ax, dy = b.y - a.y;
                     double depthBelow = (a.y - HORIZON_Y) / (WIN_HEIGHT - HORIZON_Y);
-                    double alienScale = (depthBelow < 0) ? 0.17 : 0.17 + 0.83 * depthBelow;
-                    if (alienScale < 0.14) alienScale = 0.14;
-                    if (alienScale > 1.0) alienScale = 1.0;
-                    double hitRadius = 28.0 * alienScale + 12.0;
+                    double alienScale = (depthBelow < 0) ? 0.08 : 0.08 + 0.92 * depthBelow;
+                    if (alienScale < 0.08) alienScale = 0.08;
+                    if (alienScale > 1.0)  alienScale = 1.0;
+                    double hitRadius = 28.0 * alienScale + 10.0;
+                    // far (scale≈0.08) → hitR≈12, near (scale≈1.0) → hitR≈38
                     if (dx*dx + dy*dy < hitRadius * hitRadius) {
-                        b.active = false;
+                        b.active = false; b.canDamage = false;
                         if (a.invincibleFrames != 0) {
                             particleMgr.spawnExplosion(b.x, b.y, 3);
                             break;
@@ -3200,7 +3225,7 @@ private:
                     if (!b.active || !b.canDamage) continue;
                     double dx = b.x - boss.getX(), dy = b.y - boss.getY();
                     if (dx*dx + dy*dy < 55.0 * 55.0) {
-                        b.active = false;
+                        b.active = false; b.canDamage = false;
                         boss.flashTimerRef() = 5;
                         audio.sndBossHit();
                         particleMgr.spawnExplosion(b.x, b.y, 4);
@@ -3349,7 +3374,7 @@ private:
                 alienMgr.draw(renderer.get());
                 bulletMgr.draw(renderer.get());
             }
-            if (isSide) drawPlaneFlat();
+            if (isSide) { drawPlaneFlat(); drawWallFlash(); }
             else drawPlane();
 
             // Floating texts
@@ -3466,26 +3491,114 @@ private:
     }
 
     void drawPlaneFlat() {
-        // Chapter 1 plane shape rotated 90° (nose right, centerline horizontal)
+        // Chapter 2 plane: nose right, parallel to corridor floor plane.
+        // Strong perspective: far side (upper) ≈55% size of near side (lower).
+        // Upper wing intact, lower wing has visible notch to distinguish up/down.
         SDL_Renderer* r = renderer.get();
         SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
         int px = player.getX(), py = player.getY();
-        // Original Chapter 1 coords rotated: (lx,ly)→(-ly,lx)
-        // nose(0,-12)→(12,0)  leftBody(-10,6)→(-6,-10)  rightBody(10,6)→(-6,10)
-        SDL_Point bodyPts[4] = {
-            {px + 12, py},       // nose
-            {px - 6, py - 10},   // left body
-            {px - 6, py + 10},   // right body
-            {px + 12, py}        // back to nose
+        float fp = 0.55f;  // dramatic foreshortening for far side
+        int bTop = (int)(10 * fp + 0.5f);  // ≈6 (near body = 10)
+        int wTop = (int)(8 * fp + 0.5f);   // ≈4 (near wing y-span = 8)
+        // Body: nose → lower(near,full) → upper(far,narrowed) → nose
+        SDL_Point body[4] = {
+            {px + 12, py},               // nose
+            {px - 6, py + 10},           // lower body (near camera, full height)
+            {px - 6, py - bTop},         // upper body (far, narrowed by perspective)
+            {px + 12, py}                // back to nose
         };
-        SDL_RenderDrawLines(r, bodyPts, 4);
-        SDL_RenderDrawLine(r, px - 6, py - 10, px - 6, py + 10); // body rear
-        // Left wing: (-6,0)→(-14,4) rotated→(0,-6)→(-4,-14)
-        SDL_RenderDrawLine(r, px + 0, py - 6, px - 4, py - 14);
-        // Right wing: (6,0)→(14,4) rotated→(0,6)→(-4,14)
-        SDL_RenderDrawLine(r, px + 0, py + 6, px - 4, py + 14);
-        // Tail: (0,6)→(0,12) rotated→(-6,0)→(-12,0)
+        SDL_RenderDrawLines(r, body, 4);
+        // Rear: slanted (far side visibly shorter)
+        SDL_RenderDrawLine(r, px - 6, py - bTop, px - 6, py + 10);
+        // Upper wing (intact, far): single line, foreshortened
+        SDL_RenderDrawLine(r, px, py - 6, (int)(px - 4*fp), py - 6 - wTop);
+        // Lower wing (notched, near): root→short mid  +  detached tip
+        SDL_RenderDrawLine(r, px, py + 6, px - 2, py + 7);     // inner: short
+        SDL_RenderDrawLine(r, px - 3, py + 11, px - 4, py + 14); // tip: detached
+        // Tail
         SDL_RenderDrawLine(r, px - 6, py, px - 12, py);
+    }
+
+    void drawWallFlash() {
+        if (wallFlashTimer <= 0) return;
+        SDL_Renderer* r = renderer.get();
+        float t = (float)wallFlashTimer / 30.0f;
+        int alpha = (int)(255.0f * t);
+        int bx = 642, cy = wallContactY;  // wall at nose-tip max reach (px=630 + nose 12)
+
+        // === Barrier core: white-hot line at contact, fading vertically ===
+        int coreH = 70;
+        for (int dy = -coreH; dy <= coreH; ++dy) {
+            int yy = cy + dy;
+            if (yy < 0 || yy >= WIN_HEIGHT) continue;
+            float dr = (float)std::abs(dy) / coreH;
+            int la = (int)(alpha * (1.0f - dr * 0.82f));
+            if (la < 8) continue;
+            SDL_SetRenderDrawColor(r, 220, 240, 255, (Uint8)la);
+            SDL_RenderDrawLine(r, bx, yy, bx, yy);
+        }
+
+        // === Inner glow: cyan-blue layers extending right (energy discharge) ===
+        for (int g = 1; g <= 5; ++g) {
+            int gx = bx + g;  // rightward
+            float gt = (float)g / 5.0f;
+            int ga = (int)(alpha * (1.0f - gt * 0.65f));
+            if (ga < 14) continue;
+            int gh = (int)(coreH * (1.0f - gt * 0.45f)) + 25;
+            for (int dy = -gh; dy <= gh; ++dy) {
+                int yy = cy + dy;
+                if (yy < 0 || yy >= WIN_HEIGHT) continue;
+                float dr = (float)std::abs(dy) / gh;
+                int la = (int)(ga * (1.0f - dr * 0.78f));
+                if (la < 6) continue;
+                int rr = (int)(60 * (1.0f - gt));
+                int gg = (int)(190 - gt * 85);
+                int bb = (int)(215 + gt * 40);
+                SDL_SetRenderDrawColor(r, (Uint8)rr, (Uint8)gg, (Uint8)bb, (Uint8)la);
+                SDL_RenderDrawPoint(r, gx, yy);
+            }
+        }
+
+        // === Lightning branches: jagged lines discharging rightward ===
+        if (t > 0.20f) {
+            int nBranches = 5;
+            for (int b = 0; b < nBranches; ++b) {
+                int seed = b * 41 + wallAnimFrame * 17;
+                int lx = bx, ly = cy;
+                int segs = 3 + (seed % 3);
+                for (int s = 0; s < segs; ++s) {
+                    int nx = lx + (5 + (seed + s * 7) % 16);  // rightward
+                    int ny = ly + ((seed * 3 + s * 13) % 23 - 11);
+                    if (nx > WIN_WIDTH + 30 || ny < 5 || ny >= WIN_HEIGHT - 5) break;
+                    int sa = (int)(alpha * (1.0f - (float)s / segs) * 0.75f);
+                    if (sa < 12) break;
+                    SDL_SetRenderDrawColor(r, 180, 210, 255, (Uint8)sa);
+                    SDL_RenderDrawLine(r, lx, ly, nx, ny);
+                    SDL_SetRenderDrawColor(r, 255, 255, 240, (Uint8)(sa / 2));
+                    SDL_RenderDrawLine(r, lx + 1, ly, nx + 1, ny);
+                    lx = nx; ly = ny;
+                }
+            }
+        }
+
+        // === Energy sparks: bright dots discharging rightward ===
+        if (t > 0.12f) {
+            int nSparks = 22;
+            for (int s = 0; s < nSparks; ++s) {
+                int seed = s * 59 + wallAnimFrame * 37;
+                int sx = bx + (3 + (seed % 32));  // rightward
+                int sy = cy + ((seed * 7 + 19) % 130 - 65);
+                if (sx > WIN_WIDTH + 20 || sy < 5 || sy >= WIN_HEIGHT - 5) continue;
+                int sa = (int)(alpha * (0.55f + 0.45f * ((float)((seed + s * 11) % 100) / 100.0f)));
+                if (sa < 22) continue;
+                SDL_SetRenderDrawColor(r, 255, 255, 240, (Uint8)sa);
+                SDL_RenderDrawPoint(r, sx, sy);
+                if ((seed % 5) == 0) {
+                    SDL_RenderDrawPoint(r, sx + 1, sy);
+                    SDL_RenderDrawPoint(r, sx, sy - 1);
+                }
+            }
+        }
     }
 
     void drawAimAssist() {
@@ -3517,16 +3630,16 @@ private:
                 double hitX = player.getX() + dx * t;
                 double dist = std::fabs(hitX - ax);
                 double depthBelow = (a.y - HORIZON_Y) / (WIN_HEIGHT - HORIZON_Y);
-                double alienScale = (depthBelow < 0) ? 0.17 : 0.17 + 0.83 * depthBelow;
-                if (alienScale < 0.14) alienScale = 0.14;
-                double hitR = 22.0 * alienScale + 8.0;
-                if (dist < hitR * 0.5 && t < bestT) { bestT = t; snapX = ax; snapY = a.y; }
+                double alienScale = (depthBelow < 0) ? 0.08 : 0.08 + 0.92 * depthBelow;
+                if (alienScale < 0.08) alienScale = 0.08;
+                double snapR = 28.0 * alienScale + 10.0;  // identical to bullet hitRadius
+                if (dist < snapR && t < bestT) { bestT = t; snapX = ax; snapY = a.y; }
             }
             if (boss.isActive() && phase != PHASE_BOSS_INTRO && phase != PHASE_BOSS_PHASE2) {
                 double bt = (boss.getY() - player.getY()) / dy;
                 if (bt > 0.0 && bt < 0.80) {
                     double hitX = player.getX() + dx * bt;
-                    if (std::fabs(hitX - boss.getX()) < 28.0 && bt < bestT) {
+                    if (std::fabs(hitX - boss.getX()) < 55.0 && bt < bestT) {  // same as bullet hit radius
                         bestT = bt; snapX = boss.getX(); snapY = boss.getY();
                     }
                 }

@@ -18,7 +18,9 @@ Control your starfighter in perspective space, shoot down alien ships, survive w
 
 > macOS 11.0+
 
-[Download v1.2.4](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.4) (latest)
+[Download v1.2.5](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.5) (latest)
+
+[Download v1.2.4](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.4)
 
 [Download v1.2.2](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.2)
 
@@ -47,12 +49,14 @@ Requires SDL2: `brew install sdl2`
 │   ├── space_shooting ver1.0.0.cpp
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
-└── v2.0.0/                                     # 当前开发主线 (v1.2.2)
+└── v2.0.0/                                     # 当前开发主线 (v1.2.5)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
     └── Release Version/                          # 发布版本
         ├── Shooter ver1.1.0.app/ + .zip                   # v1.1.0
-        └── Shooter ver1.2.2.app/ + .zip                   # v1.2.2 (最新)
+        ├── Shooter ver1.2.2.app/ + .zip                   # v1.2.2
+        ├── Shooter ver1.2.4.app/ + .zip                   # v1.2.4
+        └── Shooter ver1.2.5.app/ + .zip                   # v1.2.5 (最新)
 ```
 
 ## License

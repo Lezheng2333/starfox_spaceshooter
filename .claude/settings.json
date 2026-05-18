@@ -1,8 +1,0 @@
-{
-  "skills": {
-    "release": {
-      "description": "编译、封装 .app、签名、打包 zip、git commit/push、创建 GitHub Release。运行前需确保开发日志、README、源码版本号已更新。",
-      "command": ".claude/skills/release.sh"
-    }
-  }
-}

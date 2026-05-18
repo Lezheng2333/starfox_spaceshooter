@@ -18,7 +18,9 @@ Control your starfighter in perspective space, shoot down alien ships, survive w
 
 > macOS 11.0+
 
-[Download v1.2.7](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.7) (latest)
+[Download v1.2.8](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.8) (latest)
+
+[Download v1.2.7](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.7)
 
 [Download v1.2.5](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.5)
 
@@ -32,12 +34,11 @@ Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.7)
+## What's New / 最近更新 (v1.2.8)
 
-- **第二章：新增普通外星飞船** — 从画面边缘突袭入场，躲在隐形墙后方朝你发射水晶子弹，打爆后第一章同款爆炸特效。
-- **玩家受伤无敌** — 被子弹打中后有 1 秒无敌时间，飞机会闪烁，不会再被连续命中。
-- **画面右上角信息栏重做** — 分数靠右对齐，血条和能量条整齐排列，不再乱糟糟。
-- **代码大整理** — 给第一章和第二章的代码分别加了 Ch1 / Ch2 前缀，理清了继承关系，为后面章节铺路。
+- **第二章测试模式** — 按 1 刷普通敌机，按 2 刷弹幕 BOSS，可以同时存在多个敌人，方便调试。
+- **瞄准辅助归位** — 瞄准辅助现在是玩家飞机的自带能力，不再是散落在代码各处的零散逻辑。
+- **代码继续打磨** — 普敌和弹幕敌人都支持多个同屏，底层用 vector 管理，架构更干净。
 
 ## Build from Source / 从源码编译
 
@@ -58,7 +59,7 @@ Requires SDL2: `brew install sdl2`
 │   ├── space_shooting ver1.0.0.cpp
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
-└── v2.0.0/                                     # 当前开发主线 (v1.2.7)
+└── v2.0.0/                                     # 当前开发主线 (v1.2.8)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
     └── Release Version/                          # 发布版本
@@ -66,7 +67,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.2.app/ + .zip                   # v1.2.2
         ├── Shooter ver1.2.4.app/ + .zip                   # v1.2.4
         ├── Shooter ver1.2.5.app/ + .zip                   # v1.2.5
-        └── Shooter ver1.2.7.app/ + .zip                   # v1.2.7 (最新)
+        ├── Shooter ver1.2.7.app/ + .zip                   # v1.2.7
+        └── Shooter ver1.2.8.app/ + .zip                   # v1.2.8 (最新)
 ```
 
 ## License

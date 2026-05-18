@@ -500,4 +500,20 @@ Ver 1.0.1 | 2026-05-08
     - 移除 Ch2ShooterBase 中的 drawHUD（HUD 不属于敌人系统，已移至 HUDBase）
     - 禁用弹幕敌人（DanmakuManager）为 Ch2 普敌测试让路，代码保留后续恢复
 
+  Ver 1.2.8 | Chapter 2 测试模式增强 + 多敌人同屏 + 瞄准辅助组件化
+    - 测试模式新增按键控制（仅 TEST 模式可用）：
+      - 按 1：刷新一个 Ch2 普敌（边沿触发，按一下只刷一个）
+      - 按 2：刷新一个弹幕敌人（入场 x 随机范围 400-630，画面中央到隐形墙之间）
+      - 画面左上角显示 "press 1/2" 提示文字
+      - 能量条暂时冻结（细节后续设计），分数正常累计（普敌 1 分，弹幕 5 分）
+    - Ch2AlienManager 向量化重构：单敌人 → std::vector<Ch2Alien>，支持多个普敌同屏
+    - Ch2DanmakuManager 向量化重构：单敌人 → std::vector<Ch2DanmakuEnemy>，
+      支持多个弹幕敌人同屏，重新启用 update/draw
+    - 瞄准辅助组件化（AimAssist）：合并为单一类嵌入 PlayerBase，每个玩家实例自带
+      瞄准辅助状态（snapProgress + update + draw），后续章节直接复用
+    - PlayerBase 提取：x/y/rollAngle/rollTarget/lastMoveDir/invFrames/aimAssist，
+      Ch1Player 继承后添加 handleInput/getT
+    - BUGFIX: 按键 1/2 每帧重复触发 → 添加边沿检测（keyNow && !keyWas）
+    - BUGFIX: 弹幕敌人入场阶段 leg 字段未初始化导致绘制异常
+
 ================================================================

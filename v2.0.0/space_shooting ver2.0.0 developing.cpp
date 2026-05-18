@@ -809,6 +809,43 @@ public:
 };
 
 
+// ============== AimAssist (owned by Player) ==============
+class AimAssist {
+    double snapProgress;
+    static void updateProgress(double& sp, bool hasTarget) {
+        if (hasTarget) sp += 0.05; else sp -= 0.12;
+        if (sp > 1.0) sp = 1.0; if (sp < 0.0) sp = 0.0;
+    }
+public:
+    AimAssist() : snapProgress(0) {}
+    void update(bool hasTarget) { updateProgress(snapProgress, hasTarget); }
+    double getSnapProgress() const { return snapProgress; }
+    void draw(SDL_Renderer* r, double drawX, double drawY, int dotBig, int dotSmall) const {
+        double ss = 8.0 * (1.0 - snapProgress);
+        if (ss > 0.5) {
+            SDL_SetRenderDrawColor(r, 255, 255, 255, (Uint8)(140 * (1.0 - snapProgress)));
+            int sx = (int)(drawX - ss), side = (int)(ss * 2);
+            int gapPx = side * 6 / 10; if (gapPx < 2) gapPx = 2;
+            int edgePx = (side - gapPx) / 2; if (edgePx < 1) edgePx = 1;
+            int sy = (int)(drawY - ss);
+            if (side >= 3) {
+                SDL_RenderDrawLine(r, sx, sy, sx+edgePx, sy);
+                SDL_RenderDrawLine(r, sx+edgePx+gapPx, sy, sx+side, sy);
+                SDL_RenderDrawLine(r, sx, sy+side, sx+edgePx, sy+side);
+                SDL_RenderDrawLine(r, sx+edgePx+gapPx, sy+side, sx+side, sy+side);
+                SDL_RenderDrawLine(r, sx, sy, sx, sy+edgePx);
+                SDL_RenderDrawLine(r, sx, sy+edgePx+gapPx, sx, sy+side);
+                SDL_RenderDrawLine(r, sx+side, sy, sx+side, sy+edgePx);
+                SDL_RenderDrawLine(r, sx+side, sy+edgePx+gapPx, sx+side, sy+side);
+            }
+        }
+        int dotSize = (snapProgress > 0.5) ? dotBig : dotSmall;
+        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+        SDL_Rect dot = {(int)(drawX - dotSize/2), (int)(drawY - dotSize/2), dotSize, dotSize};
+        SDL_RenderFillRect(r, &dot);
+    }
+};
+
 // ============== PlayerBase (shared player state) ==============
 class PlayerBase {
 protected:
@@ -820,6 +857,8 @@ protected:
     static const int HALF_WIDTH = 15;
 
 public:
+    AimAssist aimAssist;  // every player has aim assist
+
     PlayerBase() : x(CENTER_X), y(WIN_HEIGHT - 80), rollAngle(0), rollTarget(0), lastMoveDir(0), invFrames(0) {}
 
     int getX() const { return x; }
@@ -2356,264 +2395,193 @@ public:
 
 // ============== Ch2DanmakuManager (Chapter 2) ==============
 class Ch2DanmakuManager : public Ch2ShooterBase {
-    Ch2DanmakuEnemy enemy;
-    float energyFill;
+    std::vector<Ch2DanmakuEnemy> enemies;
 
-public:
-    Ch2DanmakuManager() : energyFill(0.0f) { enemy.active = false; enemy.defeated = false; }
-
-    void reset() {
-        enemy.active = false; enemy.defeated = false;
-        resetBase();
+    void computeLegs(Ch2DanmakuEnemy& e) {
+        double dx = e.x - 400, dy = e.y + 60;
+        double dist = std::sqrt(dx*dx + dy*dy);
+        double scale = 0.55 + 0.45 * (dist / 340.0);
+        if (scale < 0.50) scale = 0.50; if (scale > 1.25) scale = 1.25;
+        int leg = (int)(16.0 * scale); if (leg < 6) leg = 6;
+        double depthFactor = (e.x - 200) / 600.0;
+        if (depthFactor < 0.1) depthFactor = 0.1; if (depthFactor > 0.7) depthFactor = 0.7;
+        e.leg = leg;
+        e.farLeg  = (int)(leg * (1.0 - depthFactor * 0.35));
+        e.nearLeg = (int)(leg * (1.0 + depthFactor * 0.15));
+        e.vpLean  = (int)(leg * depthFactor * 0.25);
     }
 
+public:
+    Ch2DanmakuManager() {}
+    void reset() { enemies.clear(); resetBase(); }
+
     void spawnEnemy() {
-        enemy.active = true; enemy.defeated = false;
-        // Enter diagonally from top-right corner
-        enemy.startX = WIN_WIDTH + 40; enemy.startY = -40;
-        enemy.targetX = 450; enemy.targetY = 280;
-        enemy.x = enemy.startX; enemy.y = enemy.startY;
-        enemy.baseX = enemy.targetX; enemy.baseY = enemy.targetY;
-        enemy.movePhase = 0;
-        enemy.hp = 50; enemy.maxHp = 50;
-        enemy.entering = true;
-        enemy.enterFrame = 0; enemy.enterDuration = 35;
-        enemy.invincibleFrames = 0;
-        enemy.vulnTimer = 0;
-        enemy.fireTimer = 0; enemy.fireInterval = 6;
-        enemy.fireAngle = 0;
-        bullets.clear();
+        Ch2DanmakuEnemy e;
+        e.startX = WIN_WIDTH + 40; e.startY = -40;
+        e.targetX = 400 + rand() % 231;  // 400-630, between screen center and invisible wall
+        e.targetY = 280;
+        e.x = e.startX; e.y = e.startY;
+        e.baseX = e.targetX; e.baseY = e.targetY;
+        e.movePhase = 0;
+        e.hp = 50; e.maxHp = 50;
+        e.active = true; e.entering = true; e.defeated = false;
+        e.enterFrame = 0; e.enterDuration = 35;
+        e.invincibleFrames = 0;
+        e.vulnTimer = 0;
+        e.fireTimer = 0; e.fireInterval = 6;
+        e.fireAngle = 0;
+        e.defeatTimer = 0;
+        enemies.push_back(e);
     }
 
     void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
                 int& score, Ch1Player& player, FloatingTextManager& ftMgr) {
-        if (enemy.defeated) {
-            if (enemy.defeatTimer > 0) {
-                enemy.defeatTimer--;
-                if (enemy.defeatTimer == 0) {
-                    particleMgr.spawnExplosion(enemy.x, enemy.y, 30);
-                    particleMgr.spawnExplosion(enemy.x-14, enemy.y-6, 18);
-                    particleMgr.spawnExplosion(enemy.x+14, enemy.y+6, 18);
-                    particleMgr.spawnExplosion(enemy.x, enemy.y-10, 12);
-                    particleMgr.spawnExplosion(enemy.x+5, enemy.y+12, 12);
-                    audio.sndExplosionBig();
+        for (auto& e : enemies) {
+            if (e.defeated) {
+                if (e.defeatTimer > 0) {
+                    e.defeatTimer--;
+                    if (e.defeatTimer == 0) {
+                        particleMgr.spawnExplosion(e.x, e.y, 30);
+                        particleMgr.spawnExplosion(e.x-14, e.y-6, 18);
+                        particleMgr.spawnExplosion(e.x+14, e.y+6, 18);
+                        particleMgr.spawnExplosion(e.x, e.y-10, 12);
+                        particleMgr.spawnExplosion(e.x+5, e.y+12, 12);
+                        audio.sndExplosionBig();
+                    }
                 }
+                continue;
             }
-            Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
-            return;
-        }
-        if (!enemy.active) return;
+            if (!e.active) continue;
 
-        if (enemy.entering) {
-            // Diagonal swoop from top-right corner to target (cubic ease-out)
-            enemy.enterFrame++;
-            double raw = (double)enemy.enterFrame / enemy.enterDuration;
-            double eased = 1.0 - std::pow(1.0 - raw, 3.0);
-            enemy.x = enemy.startX + (enemy.targetX - enemy.startX) * eased;
-            enemy.y = enemy.startY + (enemy.targetY - enemy.startY) * eased;
-            if (enemy.enterFrame >= enemy.enterDuration) {
-                enemy.entering = false;
-                enemy.invincibleFrames = 300;
-                enemy.fireTimer = 0; enemy.fireAngle = 0;
-                enemy.baseX = enemy.targetX; enemy.baseY = enemy.targetY;
-                enemy.movePhase = 0;
+            if (e.entering) {
+                e.enterFrame++;
+                double raw = (double)e.enterFrame / e.enterDuration;
+                double eased = 1.0 - std::pow(1.0 - raw, 3.0);
+                e.x = e.startX + (e.targetX - e.startX) * eased;
+                e.y = e.startY + (e.targetY - e.startY) * eased;
+                computeLegs(e);  // needed for draw during entrance
+                if (e.enterFrame >= e.enterDuration) {
+                    e.entering = false;
+                    e.invincibleFrames = 300;
+                    e.fireTimer = 0; e.fireAngle = 0;
+                    e.baseX = e.targetX; e.baseY = e.targetY;
+                    e.movePhase = 0;
+                }
+                continue;
             }
-        } else {
-            // Slow oscillation along perspective ray from VP (400, -60)
-            // Moving toward VP = away from camera (smaller), away from VP = toward camera (larger)
-            enemy.movePhase += 0.007;
-            double osc = std::sin(enemy.movePhase) * 55.0;  // amplitude 55px along perspective ray
-            double vdx = enemy.baseX - 400;  // direction from VP to base
-            double vdy = enemy.baseY + 60;
+
+            e.movePhase += 0.007;
+            double osc = std::sin(e.movePhase) * 55.0;
+            double vdx = e.baseX - 400, vdy = e.baseY + 60;
             double vlen = std::sqrt(vdx*vdx + vdy*vdy);
             if (vlen < 1.0) vlen = 1.0;
             double nx = vdx / vlen, ny = vdy / vlen;
-            enemy.x = enemy.baseX + nx * osc;
-            enemy.y = enemy.baseY + ny * osc;
+            e.x = e.baseX + nx * osc;
+            e.y = e.baseY + ny * osc;
 
-            if (enemy.invincibleFrames > 0) {
-                enemy.invincibleFrames--;
-                enemy.fireTimer++;
-                if (enemy.fireTimer >= 6) {
-                    enemy.fireTimer = 0;
-                    enemy.fireAngle += 0.35;
-                    double speed = 1.5;
+            if (e.invincibleFrames > 0) {
+                e.invincibleFrames--;
+                e.fireTimer++;
+                if (e.fireTimer >= 6) {
+                    e.fireTimer = 0;
+                    e.fireAngle += 0.35;
                     for (int s = 0; s < 2; ++s) {
                         Ch2EnemyBullet db;
-                        db.x = enemy.x; db.y = enemy.y;
-                        double a = enemy.fireAngle + s * M_PI;
-                        db.dx = std::cos(a) * speed;
-                        db.dy = std::sin(a) * speed;
+                        db.x = e.x; db.y = e.y;
+                        double a = e.fireAngle + s * M_PI;
+                        db.dx = std::cos(a) * 1.5;
+                        db.dy = std::sin(a) * 1.5;
                         db.hp = 3; db.active = true;
                         bullets.push_back(db);
                     }
                 }
-                if (enemy.invincibleFrames <= 0) enemy.vulnTimer = 180;  // 3 seconds
-            } else if (enemy.vulnTimer > 0) {
-                enemy.vulnTimer--;
-                if (enemy.vulnTimer <= 0 && enemy.hp > 0) {
-                    enemy.invincibleFrames = 300; enemy.fireTimer = 0;
+                if (e.invincibleFrames <= 0) e.vulnTimer = 180;
+            } else if (e.vulnTimer > 0) {
+                e.vulnTimer--;
+                if (e.vulnTimer <= 0 && e.hp > 0) {
+                    e.invincibleFrames = 300; e.fireTimer = 0;
                 }
             }
-        }
 
-        computeLegs();
-        // Base class handles bullet movement + player-vs-bullet collisions
-        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
-        // Danmaku-specific: player bullets vs enemy AABB
-        if (!enemy.entering && enemy.invincibleFrames <= 0 && enemy.vulnTimer > 0) {
-            int fl = enemy.farLeg, nl = enemy.nearLeg, vl = enemy.vpLean;
-            int ex = (int)enemy.x, ey = (int)enemy.y;
-            for (auto& b : bulletMgr.all()) {
-                if (!b.active || !b.canDamage) continue;
-                int bx = (int)b.x, by = (int)b.y;
-                if (bx >= ex - fl && bx <= ex + nl && by >= ey - nl + vl && by <= ey + nl) {
-                    b.active = false; b.canDamage = false; enemy.hp--;
-                    particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
-                    if (enemy.hp <= 0) {
-                        enemy.defeated = true; enemy.active = false;
-                        enemy.defeatTimer = 70; score += 5;
+            computeLegs(e);
+            // Player bullets vs danmaku enemy AABB
+            if (!e.entering && e.invincibleFrames <= 0 && e.vulnTimer > 0) {
+                int fl = e.farLeg, nl = e.nearLeg, vl = e.vpLean;
+                int ex = (int)e.x, ey = (int)e.y;
+                for (auto& b : bulletMgr.all()) {
+                    if (!b.active || !b.canDamage) continue;
+                    int bx = (int)b.x, by = (int)b.y;
+                    if (bx >= ex - fl && bx <= ex + nl && by >= ey - nl + vl && by <= ey + nl) {
+                        b.active = false; b.canDamage = false; e.hp--;
+                        particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
+                        if (e.hp <= 0) {
+                            e.defeated = true; e.active = false;
+                            e.defeatTimer = 70; score += 5;
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }
-    }
-
-private:
-    void computeLegs() {
-        // Scale based on distance from VP (400, -60): far=small, near=large
-        double dx = enemy.x - 400, dy = enemy.y + 60;
-        double dist = std::sqrt(dx*dx + dy*dy);
-        double scale = 0.55 + 0.45 * (dist / 340.0);
-        if (scale < 0.50) scale = 0.50;
-        if (scale > 1.25) scale = 1.25;
-        int leg = (int)(16.0 * scale);
-        if (leg < 6) leg = 6;
-        double depthFactor = (enemy.x - 200) / 600.0;
-        if (depthFactor < 0.1) depthFactor = 0.1;
-        if (depthFactor > 0.7) depthFactor = 0.7;
-        enemy.leg = leg;
-        enemy.farLeg  = (int)(leg * (1.0 - depthFactor * 0.35));
-        enemy.nearLeg = (int)(leg * (1.0 + depthFactor * 0.15));
-        enemy.vpLean  = (int)(leg * depthFactor * 0.25);
+        // Remove fully dead enemies (defeated and timer done)
+        enemies.erase(std::remove_if(enemies.begin(), enemies.end(),
+            [](const Ch2DanmakuEnemy& e){ return e.defeated && e.defeatTimer <= 0; }), enemies.end());
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
     }
 
     void drawEnemy(SDL_Renderer* r) const {
-        if (!enemy.active && !enemy.defeated) return;
-        if (enemy.defeated && enemy.defeatTimer <= 0) return;
-        int ex = (int)enemy.x, ey = (int)enemy.y;
-        if (enemy.defeated && enemy.defeatTimer > 0) {
-            if ((enemy.defeatTimer / 3) % 2) return;
-            int shake = (enemy.defeatTimer > 35) ? 6 : 3;
-            ex += (rand() % (shake*2+1)) - shake;
-            ey += (rand() % (shake*2+1)) - shake;
-        }
-
-        // Entrance trail — particle-like blue dots along diagonal path
-        if (enemy.entering && enemy.enterFrame > 3) {
-            for (int k = 1; k <= 5; ++k) {
-                double pastRaw = (double)(enemy.enterFrame - k * 2) / enemy.enterDuration;
-                if (pastRaw < 0) continue;
-                double pastEased = 1.0 - std::pow(1.0 - pastRaw, 3.0);
-                int pastX = (int)(enemy.startX + (enemy.targetX - enemy.startX) * pastEased);
-                int pastY = (int)(enemy.startY + (enemy.targetY - enemy.startY) * pastEased);
-                int alpha = 160 - k * 27;
-                SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)alpha);
-                SDL_RenderDrawPoint(r, pastX, pastY);
-                SDL_RenderDrawPoint(r, pastX-1, pastY);
-                SDL_RenderDrawPoint(r, pastX+1, pastY);
-                SDL_RenderDrawPoint(r, pastX, pastY-1);
-                SDL_RenderDrawPoint(r, pastX, pastY+1);
+        for (const auto& e : enemies) {
+            if (!e.active && !e.defeated) continue;
+            if (e.defeated && e.defeatTimer <= 0) continue;
+            int ex = (int)e.x, ey = (int)e.y;
+            if (e.defeated && e.defeatTimer > 0) {
+                if ((e.defeatTimer / 3) % 2) continue;
+                int shake = (e.defeatTimer > 35) ? 6 : 3;
+                ex += (rand() % (shake*2+1)) - shake;
+                ey += (rand() % (shake*2+1)) - shake;
             }
-        }
-
-        int rCol, gCol, bCol;
-        if (enemy.entering || enemy.invincibleFrames > 0) {
-            rCol = 100; gCol = 180; bCol = 255;
-        } else {
-            double hpR = (double)enemy.hp / enemy.maxHp;
-            rCol = 255; gCol = (int)(150*hpR + 80*(1-hpR)); bCol = (int)(100*hpR + 30*(1-hpR));
-        }
-        SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
-
-        int farLeg = enemy.farLeg, nearLeg = enemy.nearLeg, vpLean = enemy.vpLean;
-
-        // Left triangle: far side (deeper in corridor), foreshortened
-        SDL_Point lt[3] = {
-            {ex - vpLean, ey},
-            {ex - farLeg, ey - farLeg + vpLean},
-            {ex - farLeg, ey + farLeg}
-        };
-        SDL_RenderDrawLines(r, lt, 3);
-        SDL_RenderDrawLine(r, lt[2].x, lt[2].y, lt[0].x, lt[0].y);
-
-        // Right triangle: near side (closer to camera), larger
-        SDL_Point rt[3] = {
-            {ex - vpLean, ey},
-            {ex + nearLeg, ey - nearLeg + vpLean},
-            {ex + nearLeg, ey + nearLeg}
-        };
-        SDL_RenderDrawLines(r, rt, 3);
-        SDL_RenderDrawLine(r, rt[2].x, rt[2].y, rt[0].x, rt[0].y);
-
-        if (!enemy.entering && enemy.invincibleFrames <= 0) {
-            int barW=50, barH=4, barX=ex-barW/2, barY=ey-enemy.leg-14;
-            SDL_SetRenderDrawColor(r, 30,30,30,255);
-            SDL_Rect bg={barX,barY,barW,barH}; SDL_RenderFillRect(r,&bg);
-            int hpW=(int)((double)enemy.hp/enemy.maxHp*barW);
-            SDL_SetRenderDrawColor(r, 220,30,30,255);
-            SDL_Rect hpR={barX,barY,hpW,barH}; SDL_RenderFillRect(r,&hpR);
-        }
-    }
-
-    void drawBullets(SDL_Renderer* r) const {
-        for (const auto& db : bullets) {
-            if (!db.active) continue;
-            int bx=(int)db.x, by=(int)db.y, rad=4;
-            double hpR=(double)db.hp/3.0;
-            SDL_SetRenderDrawColor(r, 180,60,200,(Uint8)(160+95*hpR));
-            SDL_RenderDrawLine(r,bx-rad,by,bx+rad,by);
-            SDL_RenderDrawLine(r,bx,by-rad,bx,by+rad);
-            SDL_RenderDrawLine(r,bx-2,by-2,bx+2,by+2);
-            SDL_RenderDrawLine(r,bx+2,by-2,bx-2,by+2);
-            SDL_SetRenderDrawColor(r, 220,140,240,200);
-            SDL_RenderDrawPoint(r,bx,by);
-        }
-    }
-
-    void drawHUD(SDL_Renderer* r, const Font& font, int score) const {
-        char buf[32];
-        snprintf(buf,sizeof(buf),"SCORE %d",score);
-        font.drawString(r,buf,WIN_WIDTH-160,10,2);
-        for (int i=0;i<3;++i) {
-            int hx=WIN_WIDTH-20-i*14;
-            SDL_SetRenderDrawColor(r,(i<playerHP)?255:70,20,20,255);
-            font.drawChar(r,'*',hx,28,2);
-        }
-        // Energy bar (Ch2 style — visually same as Ch1, separate functionality)
-        {
-            const int EBAR_X = WIN_WIDTH - 20 - (3-1)*14;    // left of hearts
-            const int EBAR_W = 3 * 14;                       // same width as 3 hearts
-            const int EBAR_Y = 46, EBAR_H = 6;
-            SDL_SetRenderDrawColor(r, 30, 30, 30, 255);
-            SDL_Rect ebg = {EBAR_X, EBAR_Y, EBAR_W, EBAR_H};
-            SDL_RenderFillRect(r, &ebg);
-            int fillW = (int)(energyFill * EBAR_W);
-            if (fillW > EBAR_W) fillW = EBAR_W;
-            if (fillW > 0) {
-                int green = (energyFill > 0.9f) ? 255 : (energyFill > 0.3f ? 180 : 100);
-                SDL_SetRenderDrawColor(r, 30, (Uint8)green, 50, 255);
-                SDL_Rect er = {EBAR_X, EBAR_Y, fillW, EBAR_H};
-                SDL_RenderFillRect(r, &er);
+            if (e.entering && e.enterFrame > 3) {
+                for (int k = 1; k <= 5; ++k) {
+                    double pastRaw = (double)(e.enterFrame - k * 2) / e.enterDuration;
+                    if (pastRaw < 0) continue;
+                    double pE = 1.0 - std::pow(1.0 - pastRaw, 3.0);
+                    int px = (int)(e.startX + (e.targetX - e.startX) * pE);
+                    int py = (int)(e.startY + (e.targetY - e.startY) * pE);
+                    int alpha = 160 - k * 27;
+                    SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)alpha);
+                    SDL_RenderDrawPoint(r, px, py);
+                    SDL_RenderDrawPoint(r, px-1, py);
+                    SDL_RenderDrawPoint(r, px+1, py);
+                    SDL_RenderDrawPoint(r, px, py-1);
+                    SDL_RenderDrawPoint(r, px, py+1);
+                }
+            }
+            int rCol, gCol, bCol;
+            if (e.entering || e.invincibleFrames > 0) { rCol=100; gCol=180; bCol=255; }
+            else {
+                double hpR = (double)e.hp / e.maxHp;
+                rCol=255; gCol=(int)(150*hpR+80*(1-hpR)); bCol=(int)(100*hpR+30*(1-hpR));
+            }
+            SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
+            int fl = e.farLeg, nl = e.nearLeg, vl = e.vpLean;
+            SDL_Point lt[3] = {{ex - vl, ey}, {ex - fl, ey - fl + vl}, {ex - fl, ey + fl}};
+            SDL_RenderDrawLines(r, lt, 3);
+            SDL_RenderDrawLine(r, lt[2].x, lt[2].y, lt[0].x, lt[0].y);
+            SDL_Point rt[3] = {{ex - vl, ey}, {ex + nl, ey - nl + vl}, {ex + nl, ey + nl}};
+            SDL_RenderDrawLines(r, rt, 3);
+            SDL_RenderDrawLine(r, rt[2].x, rt[2].y, rt[0].x, rt[0].y);
+            if (!e.entering && e.invincibleFrames <= 0) {
+                int barW=50, barH=4, barX=ex-barW/2, barY=ey-e.leg-14;
+                SDL_SetRenderDrawColor(r, 30,30,30,255);
+                SDL_Rect bg={barX,barY,barW,barH}; SDL_RenderFillRect(r,&bg);
+                int hpW=(int)((double)e.hp/e.maxHp*barW);
+                SDL_SetRenderDrawColor(r, 220,30,30,255);
+                SDL_Rect hpR={barX,barY,hpW,barH}; SDL_RenderFillRect(r,&hpR);
             }
         }
     }
 
-    Ch2DanmakuEnemy& getEnemy() { return enemy; }
-    const std::vector<Ch2EnemyBullet>& getBullets() const { return bullets; }
-    bool isGameOver() const { return gameOver; }
-    int getPlayerHP() const { return playerHP; }
+    const std::vector<Ch2DanmakuEnemy>& getEnemies() const { return enemies; }
 };
 
 
@@ -2629,132 +2597,131 @@ class Ch2AlienManager : public Ch2ShooterBase {
     static const int BURST_INTERVAL = 8;
     static const int BURST_COUNT = 5;
 
-    Ch2Alien alien;
-    bool hasSpawned;
+    std::vector<Ch2Alien> aliens;
 
-    void fireBullet(Ch1Player& player) {
-        double dx = player.getX() - alien.x, dy = player.getY() - alien.y;
+    void fireBullet(Ch1Player& player, Ch2Alien& a) {
+        double dx = player.getX() - a.x, dy = player.getY() - a.y;
         double d = std::sqrt(dx*dx + dy*dy); if (d < 1) d = 1;
         Ch2EnemyBullet b;
-        b.x = alien.x; b.y = alien.y;
+        b.x = a.x; b.y = a.y;
         b.dx = dx / d * 1.5; b.dy = dy / d * 1.5;
         b.hp = 3; b.active = true;
         bullets.push_back(b);
     }
 
-public:
-    Ch2AlienManager() : hasSpawned(false) {
-        alien.active = false; alien.defeated = false;
-    }
-    void reset() { alien.active = false; alien.defeated = false; resetBase(); hasSpawned = false; }
-    Ch2Alien& getAlien() { return alien; }
-
-    void spawnIfNeeded() {
-        if (hasSpawned || alien.active || alien.defeated) return;
-        hasSpawned = true;
-        alien.targetX = 640 + rand() % 141;  // 640-780, between invisible wall (630) and right edge (800)
-        alien.targetY = 40 + rand() % 521;
+    void spawnOne() {
+        Ch2Alien a;
+        a.targetX = 640 + rand() % 141;
+        a.targetY = 40 + rand() % 521;
         int side = rand() % 4;
-        if (side == 0)      { alien.startX = 660; alien.startY = 40 + rand() % 521; }
-        else if (side == 1) { alien.startX = -10; alien.startY = 40 + rand() % 521; }
-        else if (side == 2) { alien.startX = 120 + rand() % 481; alien.startY = -10; }
-        else                { alien.startX = 120 + rand() % 481; alien.startY = 610; }
-        alien.x = alien.startX; alien.y = alien.startY;
-        alien.hp = ALIEN_HP;
-        alien.active = true; alien.entering = true; alien.defeated = false;
-        alien.enterFrame = 0;
-        alien.enterDuration = 20 + rand() % 26;
-        alien.invincibleFrames = 0;
-        alien.fireVolleyTimer = 0; alien.fireBurstCount = 0; alien.fireBurstTimer = 0;
+        if (side == 0)      { a.startX = 660; a.startY = 40 + rand() % 521; }
+        else if (side == 1) { a.startX = -10; a.startY = 40 + rand() % 521; }
+        else if (side == 2) { a.startX = 120 + rand() % 481; a.startY = -10; }
+        else                { a.startX = 120 + rand() % 481; a.startY = 610; }
+        a.x = a.startX; a.y = a.startY;
+        a.hp = ALIEN_HP; a.active = true; a.entering = true; a.defeated = false;
+        a.enterFrame = 0; a.enterDuration = 20 + rand() % 26;
+        a.invincibleFrames = 0;
+        a.fireVolleyTimer = 0; a.fireBurstCount = 0; a.fireBurstTimer = 0;
+        aliens.push_back(a);
     }
+
+public:
+    Ch2AlienManager() {}
+    void reset() { aliens.clear(); resetBase(); }
+    void forceSpawn() { spawnOne(); }
+    const std::vector<Ch2Alien>& getAliens() const { return aliens; }
 
     void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
                 int& score, Ch1Player& player, FloatingTextManager& ftMgr) {
-        if (!alien.active && !alien.defeated) return;
-        if (alien.defeated) {
-            Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
-            if (bullets.empty()) alien.defeated = false;
-            return;
-        }
-        if (alien.entering) {
-            alien.enterFrame++;
-            double raw = (double)alien.enterFrame / alien.enterDuration;
-            double eased = 1.0 - std::pow(1.0 - raw, 3.0);
-            if (raw >= 1.0) { raw = 1.0; eased = 1.0; alien.entering = false; alien.invincibleFrames = 3; alien.fireVolleyTimer = 0; }
-            alien.x = alien.startX + (alien.targetX - alien.startX) * eased;
-            alien.y = alien.startY + (alien.targetY - alien.startY) * eased;
-            return;
-        }
-        if (alien.invincibleFrames > 0) {
-            alien.invincibleFrames--;
-            if (alien.invincibleFrames <= 0) alien.fireVolleyTimer = 0;
-        } else {
-            alien.x -= 0.35;
-            if (alien.x < -40) { alien.active = false; alien.defeated = true; return; }
-            if (alien.fireBurstCount > 0) {
-                alien.fireBurstTimer--;
-                if (alien.fireBurstTimer <= 0) {
-                    alien.fireBurstTimer = BURST_INTERVAL;
-                    fireBullet(player); audio.sndShoot();
-                    alien.fireBurstCount--;
-                    if (alien.fireBurstCount <= 0) alien.fireVolleyTimer = VOLNEY_COOLDOWN;
-                }
+        for (auto& a : aliens) {
+            if (!a.active && !a.defeated) continue;
+            if (a.defeated) continue;
+            if (a.entering) {
+                a.enterFrame++;
+                double raw = (double)a.enterFrame / a.enterDuration;
+                double eased = 1.0 - std::pow(1.0 - raw, 3.0);
+                if (raw >= 1.0) { raw = 1.0; eased = 1.0; a.entering = false; a.invincibleFrames = 3; a.fireVolleyTimer = 0; }
+                a.x = a.startX + (a.targetX - a.startX) * eased;
+                a.y = a.startY + (a.targetY - a.startY) * eased;
+                continue;
+            }
+            if (a.invincibleFrames > 0) {
+                a.invincibleFrames--;
+                if (a.invincibleFrames <= 0) a.fireVolleyTimer = 0;
             } else {
-                alien.fireVolleyTimer--;
-                if (alien.fireVolleyTimer <= 0) { alien.fireBurstCount = BURST_COUNT; alien.fireBurstTimer = 0; }
-            }
-        }
-        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
-        // Alien-specific: player bullets vs alien collision
-        if (!alien.entering && alien.invincibleFrames <= 0) {
-            for (auto& b : bulletMgr.all()) {
-                if (!b.active || !b.canDamage) continue;
-                double dx = b.x - alien.x, dy = b.y - alien.y;
-                if (dx*dx + dy*dy < 22.0*22.0) {
-                    b.active = false; b.canDamage = false; alien.hp--;
-                    particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
-                    if (alien.hp <= 0) {
-                        alien.defeated = true; alien.active = false;
-                        particleMgr.spawnExplosion(alien.x, alien.y, 20);
-                        particleMgr.spawnExplosion(alien.x-8, alien.y-4, 12);
-                        particleMgr.spawnExplosion(alien.x+8, alien.y+4, 12);
-                        audio.sndExplosionSmall(); score += 3;
+                a.x -= 0.35;
+                if (a.x < -40) { a.active = false; a.defeated = true; continue; }
+                if (a.fireBurstCount > 0) {
+                    a.fireBurstTimer--;
+                    if (a.fireBurstTimer <= 0) {
+                        a.fireBurstTimer = BURST_INTERVAL;
+                        fireBullet(player, a); audio.sndShoot();
+                        a.fireBurstCount--;
+                        if (a.fireBurstCount <= 0) a.fireVolleyTimer = VOLNEY_COOLDOWN;
                     }
-                    break;
+                } else {
+                    a.fireVolleyTimer--;
+                    if (a.fireVolleyTimer <= 0) { a.fireBurstCount = BURST_COUNT; a.fireBurstTimer = 0; }
+                }
+            }
+            // Player bullets vs alien collision
+            if (!a.entering && a.invincibleFrames <= 0) {
+                for (auto& b : bulletMgr.all()) {
+                    if (!b.active || !b.canDamage) continue;
+                    double dx = b.x - a.x, dy = b.y - a.y;
+                    if (dx*dx + dy*dy < 22.0*22.0) {
+                        b.active = false; b.canDamage = false; a.hp--;
+                        particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
+                        if (a.hp <= 0) {
+                            a.defeated = true; a.active = false;
+                            particleMgr.spawnExplosion(a.x, a.y, 20);
+                            particleMgr.spawnExplosion(a.x-8, a.y-4, 12);
+                            particleMgr.spawnExplosion(a.x+8, a.y+4, 12);
+                            audio.sndExplosionSmall(); score += 1;
+                        }
+                        break;
+                    }
                 }
             }
         }
+        // Remove defeated/inactive aliens
+        aliens.erase(std::remove_if(aliens.begin(), aliens.end(),
+            [](const Ch2Alien& a){ return !a.active && !a.defeated; }), aliens.end());
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
     }
 
     void drawEnemy(SDL_Renderer* r) const {
-        if (!alien.active) return;
-        int ex = (int)alien.x, ey = (int)alien.y, sz = 12;
-        int rCol, gCol, bCol;
-        if (alien.entering || alien.invincibleFrames > 0) { rCol=100; gCol=180; bCol=255; }
-        else {
-            double hpR = (double)alien.hp / ALIEN_HP;
-            rCol=255; gCol=(int)(150*hpR+80*(1-hpR)); bCol=(int)(100*hpR+30*(1-hpR));
-        }
-        if (alien.entering && alien.enterFrame > 3) {
-            for (int k = 1; k <= 3; ++k) {
-                double pRaw = (double)(alien.enterFrame - k*3) / alien.enterDuration;
-                if (pRaw < 0) continue;
-                double pE = 1.0 - std::pow(1.0 - pRaw, 3.0);
-                int px = (int)(alien.startX + (alien.targetX - alien.startX) * pE);
-                int py = (int)(alien.startY + (alien.targetY - alien.startY) * pE);
-                SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)(150 - k*40));
-                SDL_RenderDrawPoint(r, px, py);
+        for (const auto& a : aliens) {
+            if (!a.active) continue;
+            int ex = (int)a.x, ey = (int)a.y, sz = 12;
+            int rCol, gCol, bCol;
+            if (a.entering || a.invincibleFrames > 0) { rCol=100; gCol=180; bCol=255; }
+            else {
+                double hpR = (double)a.hp / ALIEN_HP;
+                rCol=255; gCol=(int)(150*hpR+80*(1-hpR)); bCol=(int)(100*hpR+30*(1-hpR));
             }
+            if (a.entering && a.enterFrame > 3) {
+                for (int k = 1; k <= 3; ++k) {
+                    double pRaw = (double)(a.enterFrame - k*3) / a.enterDuration;
+                    if (pRaw < 0) continue;
+                    double pE = 1.0 - std::pow(1.0 - pRaw, 3.0);
+                    int px = (int)(a.startX + (a.targetX - a.startX) * pE);
+                    int py = (int)(a.startY + (a.targetY - a.startY) * pE);
+                    SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)(150 - k*40));
+                    SDL_RenderDrawPoint(r, px, py);
+                }
+            }
+            SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
+            int hw = sz * 2 / 3;
+            SDL_Point pts[4] = {
+                {ex, ey - sz}, {ex + hw, ey},
+                {ex, ey + sz}, {ex - hw, ey}
+            };
+            SDL_RenderDrawLines(r, pts, 4);
+            SDL_RenderDrawLine(r, pts[3].x, pts[3].y, pts[0].x, pts[0].y);
+            SDL_RenderDrawLine(r, ex - hw, ey, ex + hw, ey);
         }
-        SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
-        int hw = sz * 2 / 3;
-        SDL_Point pts[4] = {
-            {ex, ey - sz}, {ex + hw, ey},
-            {ex, ey + sz}, {ex - hw, ey}
-        };
-        SDL_RenderDrawLines(r, pts, 4);
-        SDL_RenderDrawLine(r, pts[3].x, pts[3].y, pts[0].x, pts[0].y);
-        SDL_RenderDrawLine(r, ex - hw, ey, ex + hw, ey);
     }
 };
 
@@ -3061,6 +3028,7 @@ class Game {
 
     // Edge detection helpers for menus
     bool upWas, downWas, enterWas, escWas, leftWas, rightWas;
+    bool key1Was, key2Was;  // test-mode enemy spawn edge detection
     int lastShockwaveLevel;
 
     // Ch1Background (per chapter, persistent)
@@ -3084,7 +3052,7 @@ public:
           wallFlashTimer(0), wallContactY(0), wallAnimFrame(0),
           dmFireCooldown(0),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
-          leftWas(false), rightWas(false), lastShockwaveLevel(0), background(nullptr), sideBg(nullptr) {
+          leftWas(false), rightWas(false), key1Was(false), key2Was(false), lastShockwaveLevel(0), background(nullptr), sideBg(nullptr) {
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         background = new Ch1Background(chapterMgr.getConfig());
         sideBg = new Ch2Background();
@@ -3268,7 +3236,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.7", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.8", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -3344,7 +3312,6 @@ private:
                     bulletMgr.updateParams(0);
                     shockwaveMgr.updateParams(0);
                     // Spawn Ch2 regular alien (danmaku disabled for testing)
-                    ch2AlienMgr.spawnIfNeeded();
                     dmFireCooldown = 0;
                     tJustEntered = true;
                 }
@@ -3640,11 +3607,19 @@ private:
             bulletMgr.update(alienMgr.all());
             bulletMgr.removeInactive();
 
-            // Ch2 alien system update (danmaku disabled for testing)
+            // ==== Ch2 test-mode controls (only active in TEST mode) ====
+            if (!isNormalPlay) {
+                bool key1Now = keys[SDL_SCANCODE_1];
+                bool key2Now = keys[SDL_SCANCODE_2];
+                if (key1Now && !key1Was) { ch2AlienMgr.forceSpawn(); }
+                if (key2Now && !key2Was) { dmMgr.spawnEnemy(); }
+                key1Was = key1Now; key2Was = key2Now;
+            }
             player.updateInvFrames();
-            ch2AlienMgr.spawnIfNeeded();
             ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, player, floatingTextMgr);
             if (ch2AlienMgr.isGameOver()) gameOver = true;
+            dmMgr.update(bulletMgr, particleMgr, audio, score, player, floatingTextMgr);
+            if (dmMgr.isGameOver()) gameOver = true;
 
             floatingTextMgr.update();
             particleMgr.update();
@@ -4000,12 +3975,13 @@ private:
                 drawPlaneFlat(); drawWallFlash();
                 ch2AlienMgr.drawEnemy(renderer.get());
                 ch2AlienMgr.drawBullets(renderer.get());
+                dmMgr.drawEnemy(renderer.get());
+                dmMgr.drawBullets(renderer.get());
                 // Ch2 HUD: all aligned to rightEdge = WIN_WIDTH - 10
                 HUDBase::drawScore(renderer.get(), font, score, WIN_WIDTH - 10, 10);
                 HUDBase::drawHPHearts(renderer.get(), font, ch2AlienMgr.getPlayerHP(), 3, WIN_WIDTH - 10, 28);
-                float eFill2 = (float)(score % 30) / 30.0f;
-                if (score >= 180) eFill2 = 1.0f;
-                HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, eFill2);
+                HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, 0.0f);  // frozen for now
+                if (!isNormalPlay) font.drawString(renderer.get(), "press 1/2", 10, 10, 2);
                 if (aimAssistOn) drawAimAssistSide();
             } else drawPlane();
 
@@ -4218,18 +4194,17 @@ private:
         double aimX = px + defaultDist, aimY = py;
         double bestT = 999.0;
         double snapX = aimX, snapY = aimY;
-        static double snapProgress = 0.0;
-
         // Ray: horizontal from player (dx=1, dy=0). Check targets along this ray.
         // No range limit (Ch2 bullets deal damage at any range).
 
-        // Check Ch2 regular alien (vulnerable state)
-        Ch2Alien& ca = ch2AlienMgr.getAlien();
-        if (ca.active && !ca.entering && ca.invincibleFrames <= 0) {
-            double t = ca.x - px;
-            if (t > 0) {
-                double lateral = std::fabs(ca.y - py);
-                if (lateral < 18.0 && t < bestT) { bestT = t; snapX = ca.x; snapY = ca.y; }
+        // Check Ch2 regular aliens (vulnerable state)
+        for (const auto& ca : ch2AlienMgr.getAliens()) {
+            if (ca.active && !ca.entering && ca.invincibleFrames <= 0) {
+                double t = ca.x - px;
+                if (t > 0) {
+                    double lateral = std::fabs(ca.y - py);
+                    if (lateral < 18.0 && t < bestT) { bestT = t; snapX = ca.x; snapY = ca.y; }
+                }
             }
         }
 
@@ -4244,40 +4219,10 @@ private:
             }
         }
 
-        if (bestT < 999.0) snapProgress += 0.05; else snapProgress -= 0.12;
-        if (snapProgress > 1.0) snapProgress = 1.0;
-        if (snapProgress < 0.0) snapProgress = 0.0;
-
-        // Teleport to snap position when target found (matches Ch1 behavior)
+        player.aimAssist.update(bestT < 999.0);
         double drawX = (bestT < 999.0) ? snapX : aimX;
         double drawY = (bestT < 999.0) ? snapY : aimY;
-
-        // Outer square shrinks to nothing as snap progresses
-        double ss = 8.0 * (1.0 - snapProgress);
-        if (ss > 0.5) {
-            SDL_SetRenderDrawColor(r, 255, 255, 255, (Uint8)(140 * (1.0 - snapProgress)));
-            int sx = (int)(drawX - ss), side = (int)(ss * 2);
-            int gapPx = side * 6 / 10;
-            if (gapPx < 2) gapPx = 2;
-            int edgePx = (side - gapPx) / 2;
-            if (edgePx < 1) edgePx = 1;
-            int sy = (int)(drawY - ss);
-            if (side >= 3) {
-                SDL_RenderDrawLine(r, sx, sy, sx+edgePx, sy);
-                SDL_RenderDrawLine(r, sx+edgePx+gapPx, sy, sx+side, sy);
-                SDL_RenderDrawLine(r, sx, sy+side, sx+edgePx, sy+side);
-                SDL_RenderDrawLine(r, sx+edgePx+gapPx, sy+side, sx+side, sy+side);
-                SDL_RenderDrawLine(r, sx, sy, sx, sy+edgePx);
-                SDL_RenderDrawLine(r, sx, sy+edgePx+gapPx, sx, sy+side);
-                SDL_RenderDrawLine(r, sx+side, sy, sx+side, sy+edgePx);
-                SDL_RenderDrawLine(r, sx+side, sy+edgePx+gapPx, sx+side, sy+side);
-            }
-        }
-        // Center dot (smaller, grows slightly when snapped)
-        int dotSize = (snapProgress > 0.5) ? 3 : 2;
-        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-        SDL_Rect dot = {(int)(drawX - dotSize/2), (int)(drawY - dotSize/2), dotSize, dotSize};
-        SDL_RenderFillRect(r, &dot);
+        player.aimAssist.draw(r, drawX, drawY, 3, 2);
     }
 
     void drawAimAssist() {
@@ -4298,8 +4243,6 @@ private:
         // Snap to nearest enemy
         double bestT = 999.0;
         double snapX = ex, snapY = ey;
-        static double snapProgress = 0.0;
-
         if (std::fabs(dy) > 0.001) {
             for (const auto& a : alienMgr.all()) {
                 if (!a.active || a.entering || a.invincibleFrames != 0) continue;
@@ -4325,37 +4268,10 @@ private:
             }
         }
 
-        if (bestT < 999.0) snapProgress += 0.05; else snapProgress -= 0.12;
-        if (snapProgress > 1.0) snapProgress = 1.0;
-        if (snapProgress < 0.0) snapProgress = 0.0;
-
+        player.aimAssist.update(bestT < 999.0);
         double drawX = (bestT < 999.0) ? snapX : ex;
         double drawY = (bestT < 999.0) ? snapY : ey;
-
-        double ss = 8.0 * (1.0 - snapProgress);
-        if (ss > 0.5) {
-            SDL_SetRenderDrawColor(r, 255, 255, 255, (Uint8)(140 * (1.0 - snapProgress)));
-            int sx = (int)(drawX - ss), side = (int)(ss * 2);
-            int gapPx = side * 6 / 10;
-            if (gapPx < 2) gapPx = 2;
-            int edgePx = (side - gapPx) / 2;
-            if (edgePx < 1) edgePx = 1;
-            int sy = (int)(drawY - ss);
-            if (side >= 3) {
-                SDL_RenderDrawLine(r, sx, sy, sx+edgePx, sy);
-                SDL_RenderDrawLine(r, sx+edgePx+gapPx, sy, sx+side, sy);
-                SDL_RenderDrawLine(r, sx, sy+side, sx+edgePx, sy+side);
-                SDL_RenderDrawLine(r, sx+edgePx+gapPx, sy+side, sx+side, sy+side);
-                SDL_RenderDrawLine(r, sx, sy, sx, sy+edgePx);
-                SDL_RenderDrawLine(r, sx, sy+edgePx+gapPx, sx, sy+side);
-                SDL_RenderDrawLine(r, sx+side, sy, sx+side, sy+edgePx);
-                SDL_RenderDrawLine(r, sx+side, sy+edgePx+gapPx, sx+side, sy+side);
-            }
-        }
-        int dotSize = (snapProgress > 0.5) ? 5 : 3;
-        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-        SDL_Rect dot = {(int)(drawX - dotSize/2), (int)(drawY - dotSize/2), dotSize, dotSize};
-        SDL_RenderFillRect(r, &dot);
+        player.aimAssist.draw(r, drawX, drawY, 5, 3);
     }
 
     // ======== PAUSED ========

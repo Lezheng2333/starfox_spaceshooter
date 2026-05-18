@@ -461,4 +461,43 @@ Ver 1.0.1 | 2026-05-08
     - BUGFIX: 右上角血量显示不正确（Chapter 1/2 HUD 互斥条件修复）
     - BUGFIX: 瞄准辅助吸附到碰撞范围外的目标（吸附半径与碰撞半径同步收紧）
 
+  Ver 1.2.6 | Chapter 2 普敌系统 + 玩家无敌帧 + HUD 优化
+    - 新增 Ch2AlienManager：第二章普通外星飞船（Ch2 普敌），OOP 封装
+      - 造型：上下两个三角形拼成菱形 + 水平分割线（与第一章敌机画法一致，代码复用）
+      - 登场：从任意边界（上下左右）cubic ease-out 突袭入场，目标位置在隐形墙右侧
+        空间（x:640-780），入场无敌帧 3 帧 + 蓝色粒子拖尾（与第一章一致）
+      - 移动：缓慢左移 0.35 px/帧（= 廊桥背景滚动速度 3.5 的 10%）
+      - 射击：无敌结束后立即向玩家位置发射 5 发点射（每发间隔 8 帧），之后每 3 秒
+        一轮；水晶子弹速度 1.5、hp=3（与弹幕敌人子弹参数一致）
+      - 血量 10，无血条；被击败触发第一章爆炸特效；离开画面左边界后直接消失
+      - 子弹继承 Ch2ShooterBase 特性：敌人离场/被击败后子弹继续飞行直至出画
+    - 玩家无敌帧系统：PlayerBase 新增 invFrames 字段（所有章节通用）
+      - 受伤后 1 秒（60 帧）无敌，期间飞机闪烁（每 4 帧切换可见/不可见）
+      - 无敌期间玩家飞机与敌人子弹不发生碰撞
+    - HUD 系统重构：提取 HUDBase 类（静态 drawScore/drawHPHearts/drawEnergyBar）
+      - SCORE 右对齐到画面右边缘，格式 "SCORE:%-4d"，数字后补空格保持定宽
+      - SCORE / HP 心心 / 能量条三者右端对齐（rightEdge = WIN_WIDTH - 10）
+    - 优化：Chapter 2 玩家子弹缩短拖尾（12px→6px），飞行速度增加 10%（dx: 10→11）
+    - 优化：弹幕敌人前后移动速度降低 42%，登场拖尾改为 5 个小型蓝色粒子点
+    - BUGFIX: Ch2 普敌登场后不发射子弹（fireVolleyTimer 状态机修复）
+    - BUGFIX: Ch2 普敌离场后子弹停止飞行（离场时标记 defeated 使子弹继续更新）
+    - BUGFIX: 第二章右上角 HUD 混乱（SCORE/HP/能量条缺失或重叠）
+
+  Ver 1.2.7 | 代码重构：全量命名规范化 + 继承体系 + 文件编排
+    - 全量类命名规范化：Chapter 1 专用类加 Ch1 前缀（12 个），Chapter 2 专用类加
+      Ch2 前缀（7 个），两章共享基础设施保持无前缀（14 个）
+    - 继承体系设计（消除重复代码）：
+      - BulletBase（x,y,dx,dy,active）→ Ch1Bullet（+透视射程衰减字段）
+      - EnemyData（active,entering,defeated,hp,maxHp,enterFrame,enterDuration,
+        invincibleFrames）→ Ch1Alien / Ch2DanmakuEnemy / Ch2Alien
+      - Ch2ShooterBase（bullets,playerHP,gameOver,updateBullets,drawBullets）
+        → Ch2DanmakuManager / Ch2AlienManager（子弹碰撞/飞行/绘制逻辑消除 ~80 行重复）
+      - PlayerBase（x,y,rollAngle,rollTarget,invFrames）→ Ch1Player
+        （+handleInput/getT），invFrames 所有后续章节通用
+      - HUDBase（drawScore/drawHPHearts/drawEnergyBar）→ Ch1/Ch2 统一调用
+    - 文件结构重编排：共享数据 → Ch1 数据 → Ch2 数据 → 共享基础设施 → Ch1 系统
+      → Ch2 系统 → 游戏框架（Game/main），父类在前子类在后
+    - 移除 Ch2ShooterBase 中的 drawHUD（HUD 不属于敌人系统，已移至 HUDBase）
+    - 禁用弹幕敌人（DanmakuManager）为 Ch2 普敌测试让路，代码保留后续恢复
+
 ================================================================

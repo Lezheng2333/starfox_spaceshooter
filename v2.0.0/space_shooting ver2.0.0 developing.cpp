@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <ctime>
 
+
 // ============== 窗口 & 透视常量 ==============
 const int WIN_WIDTH = 800;
 const int WIN_HEIGHT = 600;
@@ -24,83 +25,29 @@ inline double perspWidth(double y) {
     return perspRight(y) - perspLeft(y);
 }
 
+
 // ============== 前置声明 ==============
 class Font;
 class Renderer;
 class AudioEngine;
 class FloatingTextManager;
-class ParticleManager;
-class Player;
-class BulletManager;
-class ShockwaveManager;
-class AlienManager;
-class Boss;
+class Ch1ParticleManager;
+class Ch1Player;
+class Ch1BulletManager;
+class Ch1ShockwaveManager;
+class Ch1AlienManager;
+class Ch1Boss;
 class ChapterManager;
-class Background;
+class Ch1Background;
+class Ch2Background;
+class Ch2DanmakuManager;
+class Ch2AlienManager;
 class UIRenderer;
 class MenuStateMachine;
 class Game;
 
-// ============== 数据结构 (值类型) ==============
-struct Particle {
-    double x, y, vx, vy;
-    int life;
-    bool active;
-    bool whiteParticle, greenParticle, redParticle;
-};
 
-struct Bullet {
-    double x, y, dx, dy;
-    double startX, startY;
-    bool active, canDamage, blueBeam;
-    bool sideScroll;      // Ch2: simple rightward flight, no range decay
-    int beamTargetIndex;
-};
-
-struct Alien {
-    double y, t;
-    double startT, targetT;
-    double enterStartY, enterTargetY;
-    bool entering, enterFromTop, enterFromBoss;
-    int enterFrame, enterDuration;
-    int invincibleFrames;
-    int lastHitBySW, lastHealHit;
-    bool beingAbsorbed;
-    int absorbFrame, absorbDuration;
-    double absorbStartX, absorbStartY;
-    int hp, maxHp;
-    bool active;
-    int alienType;
-    int behaviorData[4];
-};
-
-struct Shockwave { double y; int id; bool active; };
-
-struct HealWave { double radius; int id; bool active; };
-
-// === Chapter 2 danmaku enemy system ===
-struct DanmakuBullet {
-    double x, y, dx, dy;
-    int hp;
-    bool active;
-};
-
-struct DanmakuEnemy {
-    double x, y;          // center position
-    double targetX;       // entrance target x
-    int hp, maxHp;
-    bool active;
-    bool entering;
-    int enterFrame, enterDuration;
-    int invincibleFrames;  // >0 = invincible + firing
-    int vulnTimer;         // counts down vulnerable time (0 = done)
-    int fireTimer;
-    int fireInterval;      // frames between spiral shots
-    double fireAngle;      // current spiral angle
-    bool defeated;
-    int defeatTimer;       // countdown after defeat for animation
-};
-
+// ============== 共享数据结构 ==============
 struct Star { float x, y; float phase; float twinkleSpeed; float driftSpeed; };
 
 struct FloatingText {
@@ -115,7 +62,7 @@ struct BossConfig {
     double moveAmplitudeX, moveAmplitudeY, moveFrequency, size;
     int enterDuration, absorbDuration, bonusHpPerAlien;
     int healWaveInterval, healHpPerWave, shakeDuration;
-    bool hasHealWaves, hasPhase2;
+    bool hasCh1HealWaves, hasPhase2;
     const char* name;
 };
 
@@ -160,6 +107,74 @@ struct MenuItem {
     bool sliderSymmetric;
     int actionId;
 };
+
+
+// === Chapter 1 data structures ===
+struct Ch1Particle {
+    double x, y, vx, vy;
+    int life;
+    bool active;
+    bool whiteParticle, greenParticle, redParticle;
+};
+
+struct BulletBase {
+    double x, y, dx, dy;
+    bool active;
+};
+
+struct Ch1Bullet : BulletBase {
+    double startX, startY;
+    bool canDamage, blueBeam;
+    bool sideScroll;      // Ch2: simple rightward flight, no range decay
+    int beamTargetIndex;
+};
+
+// === Enemy base traits (shared by all enemy types) ===
+struct EnemyData {
+    bool active, entering, defeated;
+    int enterFrame, enterDuration;
+    int invincibleFrames;
+    int hp, maxHp;
+};
+
+struct Ch1Alien : EnemyData {
+    double y, t;
+    double startT, targetT;
+    double enterStartY, enterTargetY;
+    bool enterFromTop, enterFromBoss;
+    int lastHitBySW, lastHealHit;
+    bool beingAbsorbed;
+    int absorbFrame, absorbDuration;
+    double absorbStartX, absorbStartY;
+    int alienType;
+    int behaviorData[4];
+};
+
+struct Ch1Shockwave { double y; int id; bool active; };
+
+struct Ch1HealWave { double radius; int id; bool active; };
+
+
+// === Chapter 2 enemy bullet (shared base) ===
+struct Ch2EnemyBullet {
+    double x, y, dx, dy;
+    int hp; bool active;
+};
+
+// === Chapter 2 danmaku data structures ===
+struct Ch2DanmakuEnemy : EnemyData {
+    double x, y;          // current center position
+    double startX, startY, targetX, targetY;  // entrance trajectory
+    double baseX, baseY;  // oscillation center (after entrance)
+    double movePhase;     // oscillation phase (radians)
+    int leg, farLeg, nearLeg, vpLean;  // computed leg sizes for collision/draw
+    int vulnTimer;         // counts down vulnerable time (0 = done)
+    int fireTimer;
+    int fireInterval;      // frames between spiral shots
+    double fireAngle;      // current spiral angle
+    int defeatTimer;       // countdown after defeat for animation
+};
+
 
 // ============== Font 类 ==============
 class Font {
@@ -267,6 +282,7 @@ public:
     const FontChar& getChar(char c) const { return chars[(int)c]; }
 };
 
+
 // ============== Renderer 类 ==============
 class Renderer {
     SDL_Renderer* sdlRenderer;
@@ -299,6 +315,7 @@ public:
     }
     void destroyTexture(SDL_Texture* tex) { SDL_DestroyTexture(tex); }
 };
+
 
 // ============== AudioEngine 类 ==============
 class AudioEngine {
@@ -620,6 +637,7 @@ const int AudioEngine::CH2_BASS_DUR[64] = {
     32,32,32,32,32,32,32,32, 32,32,32,32,32,32,32,32,
 };
 
+
 // ============== FloatingTextManager ==============
 class FloatingTextManager {
     std::vector<FloatingText> texts;
@@ -654,13 +672,14 @@ public:
     std::vector<FloatingText>& all() { return texts; }
 };
 
-// ============== ParticleManager ==============
-class ParticleManager {
-    std::vector<Particle> particles;
+
+// ============== Ch1ParticleManager ==============
+class Ch1ParticleManager {
+    std::vector<Ch1Particle> particles;
 public:
     void spawnExplosion(double x, double y, int count) {
         for (int i = 0; i < count; ++i) {
-            Particle p;
+            Ch1Particle p;
             p.x = x; p.y = y;
             double angle = (rand() % 360) * M_PI / 180.0;
             double speed = 1.2 + (rand() % 400) / 100.0;
@@ -676,7 +695,7 @@ public:
     }
 
     void spawnWhiteParticle(double x, double y, double vx, double vy, int life) {
-        Particle p;
+        Ch1Particle p;
         p.x = x; p.y = y; p.vx = vx; p.vy = vy;
         p.life = life; p.active = true;
         p.whiteParticle = true;
@@ -685,7 +704,7 @@ public:
     }
 
     void spawnGreenParticle(double x, double y, double vx, double vy, int life) {
-        Particle p;
+        Ch1Particle p;
         p.x = x; p.y = y; p.vx = vx; p.vy = vy;
         p.life = life; p.active = true;
         p.whiteParticle = false;
@@ -694,7 +713,7 @@ public:
     }
 
     void spawnRedParticle(double x, double y, double vx, double vy, int life) {
-        Particle p;
+        Ch1Particle p;
         p.x = x; p.y = y; p.vx = vx; p.vy = vy;
         p.life = life; p.active = true;
         p.whiteParticle = false;
@@ -714,7 +733,7 @@ public:
                 double py = dy + row * digitScale + digitScale / 2.0;
                 int n = 4 + rand() % 3;
                 for (int k = 0; k < n; ++k) {
-                    Particle p;
+                    Ch1Particle p;
                     p.x = px + (rand() % (digitScale + 1)) - digitScale / 2.0;
                     p.y = py + (rand() % (digitScale + 1)) - digitScale / 2.0;
                     double angle = (rand() % 360) * M_PI / 180.0;
@@ -732,7 +751,7 @@ public:
 
     void spawnFireworks(double cx, double cy) {
         for (int k = 0; k < 12; ++k) {
-            Particle p;
+            Ch1Particle p;
             double angle = (rand() % 360) * M_PI / 180.0;
             double speed = 2.5 + (rand() % 500) / 100.0;
             p.x = cx + (rand() % 240 - 120);
@@ -783,26 +802,47 @@ public:
 
     void removeInactive() {
         particles.erase(std::remove_if(particles.begin(), particles.end(),
-            [](const Particle& p){ return !p.active; }), particles.end());
+            [](const Ch1Particle& p){ return !p.active; }), particles.end());
     }
 
-    std::vector<Particle>& all() { return particles; }
+    std::vector<Ch1Particle>& all() { return particles; }
 };
 
-// ============== Player ==============
-class Player {
+
+// ============== PlayerBase (shared player state) ==============
+class PlayerBase {
+protected:
     int x, y;
     double rollAngle, rollTarget;
     int lastMoveDir;
+    int invFrames;  // invincibility after taking damage
     static constexpr double ROLL_SPEED = 0.314;
     static const int HALF_WIDTH = 15;
 
 public:
-    Player() : x(CENTER_X), y(WIN_HEIGHT - 80), rollAngle(0), rollTarget(0), lastMoveDir(0) {}
+    PlayerBase() : x(CENTER_X), y(WIN_HEIGHT - 80), rollAngle(0), rollTarget(0), lastMoveDir(0), invFrames(0) {}
+
+    int getX() const { return x; }
+    int getY() const { return y; }
+    double getRollAngle() const { return rollAngle; }
+    int getInvFrames() const { return invFrames; }
+    void setX(int nx) { x = nx; }
+    void setY(int ny) { y = ny; }
+    void setRollTarget(double rt) { rollTarget = rt; }
+    void setRollAngle(double ra) { rollAngle = ra; }
+    void setInvFrames(int f) { invFrames = f; }
+    void updateInvFrames() { if (invFrames > 0) invFrames--; }
+};
+
+// ============== Ch1Player (Chapter 1 perspective movement) ==============
+class Ch1Player : public PlayerBase {
+public:
+    Ch1Player() : PlayerBase() {}
 
     void reset() {
         x = CENTER_X; y = WIN_HEIGHT - 80;
         rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
+        invFrames = 0;
     }
 
     void handleInput(const Uint8* keys) {
@@ -838,23 +878,17 @@ public:
         }
     }
 
-    int getX() const { return x; }
-    int getY() const { return y; }
-    double getRollAngle() const { return rollAngle; }
     double getT() const {
         double t = (x - perspLeft(y)) / perspWidth(y);
         if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
         return t;
     }
-    void setX(int nx) { x = nx; }
-    void setY(int ny) { y = ny; }
-    void setRollTarget(double rt) { rollTarget = rt; }
-    void setRollAngle(double ra) { rollAngle = ra; }
 };
 
-// ============== BulletManager ==============
-class BulletManager {
-    std::vector<Bullet> bullets;
+
+// ============== Ch1BulletManager ==============
+class Ch1BulletManager {
+    std::vector<Ch1Bullet> bullets;
     int fireCooldown;
     int fireDelay;
     double bulletSpeed;
@@ -863,7 +897,7 @@ class BulletManager {
     static constexpr double BULLET_RANGE = 370.0;
 
 public:
-    BulletManager() : fireCooldown(0), fireDelay(BASE_FIRE_DELAY), bulletSpeed(BASE_BULLET_SPEED) {}
+    Ch1BulletManager() : fireCooldown(0), fireDelay(BASE_FIRE_DELAY), bulletSpeed(BASE_BULLET_SPEED) {}
 
     void reset() { bullets.clear(); fireCooldown = 0; updateParams(0); }
 
@@ -875,7 +909,7 @@ public:
         bulletSpeed = BASE_BULLET_SPEED * std::pow(1.1, lv - 1);
     }
 
-    void addBullet(const Player& player, AudioEngine* audio) {
+    void addBullet(Ch1Player& player, AudioEngine* audio) {
         double tPlane = player.getT();
         double spread = (rand() % 40 - 20) / 1000.0;
         double tBullet = tPlane + spread;
@@ -890,7 +924,7 @@ public:
         double len = std::sqrt(dirX * dirX + dirY * dirY);
         if (len < 0.001) return;
 
-        Bullet b;
+        Ch1Bullet b;
         b.x = (double)player.getX();
         b.y = (double)player.getY();
         b.startX = player.getX(); b.startY = player.getY();
@@ -902,7 +936,7 @@ public:
     }
 
     void addBossBeam(double bossX, double bossY, double ax, double ay, int targetIdx) {
-        Bullet beam;
+        Ch1Bullet beam;
         beam.x = bossX; beam.y = bossY;
         double bdx = ax - bossX, bdy = ay - bossY;
         double blen = std::sqrt(bdx*bdx + bdy*bdy);
@@ -914,13 +948,13 @@ public:
         bullets.push_back(beam);
     }
 
-    void addBulletSideScroll(const Player& player, AudioEngine* audio) {
-        Bullet b;
+    void addBulletSideScroll(Ch1Player& player, AudioEngine* audio) {
+        Ch1Bullet b;
         b.x = (double)player.getX() + 14;
         b.y = (double)player.getY();
         b.startX = b.x; b.startY = b.y;
         double scatter = (rand() % 16 - 8) / 50.0;  // minimal vertical scatter
-        b.dx = 10.0; b.dy = scatter;
+        b.dx = 11.0; b.dy = scatter;
         b.active = true; b.canDamage = true;
         b.sideScroll = true;
         b.blueBeam = false; b.beamTargetIndex = -1;
@@ -932,7 +966,7 @@ public:
     void decrementCooldown() { if (fireCooldown > 0) fireCooldown--; }
     void setCooldown() { fireCooldown = fireDelay; }
 
-    void update(const std::vector<Alien>& aliens) {
+    void update(const std::vector<Ch1Alien>& aliens) {
         for (auto& b : bullets) {
             if (!b.active) continue;
             if (b.sideScroll) {
@@ -942,7 +976,7 @@ public:
             }
             if (b.blueBeam) {
                 if (b.beamTargetIndex >= 0 && b.beamTargetIndex < (int)aliens.size()) {
-                    const Alien& ta = aliens[b.beamTargetIndex];
+                    const Ch1Alien& ta = aliens[b.beamTargetIndex];
                     if (ta.active) {
                         double ax = perspLeft(ta.y) + ta.t * perspWidth(ta.y);
                         double tdx = ax - b.x, tdy = ta.y - b.y;
@@ -973,9 +1007,9 @@ public:
         for (const auto& b : bullets) {
             if (!b.active) continue;
             if (b.sideScroll) {
-                // Simple rightward bullet: white line + trail
+                // Rightward bullet: white line + short trail
                 SDL_SetRenderDrawColor(renderer, 80, 80, 80, 100);
-                SDL_RenderDrawLine(renderer, (int)b.x-14, (int)b.y, (int)b.x-2, (int)b.y);
+                SDL_RenderDrawLine(renderer, (int)b.x-8, (int)b.y, (int)b.x-2, (int)b.y);
                 SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
                 SDL_RenderDrawLine(renderer, (int)b.x-2, (int)b.y, (int)b.x+14, (int)b.y);
                 continue;
@@ -1019,18 +1053,19 @@ public:
 
     void removeInactive() {
         bullets.erase(std::remove_if(bullets.begin(), bullets.end(),
-            [](const Bullet& b){ return !b.active; }), bullets.end());
+            [](const Ch1Bullet& b){ return !b.active; }), bullets.end());
     }
 
-    std::vector<Bullet>& all() { return bullets; }
+    std::vector<Ch1Bullet>& all() { return bullets; }
     int getFireDelay() const { return fireDelay; }
     double getBulletSpeed() const { return bulletSpeed; }
     static double getBulletRange() { return BULLET_RANGE; }
 };
 
-// ============== ShockwaveManager ==============
-class ShockwaveManager {
-    std::vector<Shockwave> shockwaves;
+
+// ============== Ch1ShockwaveManager ==============
+class Ch1ShockwaveManager {
+    std::vector<Ch1Shockwave> shockwaves;
     int nextID;
     int timer;
     int interval;
@@ -1040,7 +1075,7 @@ class ShockwaveManager {
     bool pending;
 
 public:
-    ShockwaveManager() : nextID(0), timer(0), interval(720), damage(3), kills(0), lastLevel(0), pending(false) {}
+    Ch1ShockwaveManager() : nextID(0), timer(0), interval(720), damage(3), kills(0), lastLevel(0), pending(false) {}
 
     void reset() {
         shockwaves.clear(); nextID = 0; timer = 0;
@@ -1055,7 +1090,7 @@ public:
         interval = sec * 60;
     }
 
-    void attemptAutoRelease(int score, const Player& player, FloatingTextManager& ft, AudioEngine* audio, ParticleManager* pm) {
+    void attemptAutoRelease(int score, Ch1Player& player, FloatingTextManager& ft, AudioEngine* audio, Ch1ParticleManager* pm) {
         if (score < 30) return;
         int curLv = score / 30;
         if (curLv > lastLevel) {
@@ -1074,9 +1109,9 @@ public:
         }
     }
 
-    void spawn(AudioEngine* audio, ParticleManager* pm = nullptr) {
+    void spawn(AudioEngine* audio, Ch1ParticleManager* pm = nullptr) {
         if (audio) audio->sndShockwave();
-        Shockwave sw;
+        Ch1Shockwave sw;
         sw.y = WIN_HEIGHT;
         sw.id = nextID++;
         sw.active = true;
@@ -1144,7 +1179,7 @@ public:
         }
     }
 
-    bool collideWithAlien(Alien& a, ParticleManager& pm, AudioEngine* audio, int& score) {
+    bool collideWithAlien(Ch1Alien& a, Ch1ParticleManager& pm, AudioEngine* audio, int& score) {
         for (auto& sw : shockwaves) {
             if (!sw.active) continue;
             if (a.lastHitBySW == sw.id) continue;
@@ -1172,7 +1207,7 @@ public:
     }
 
     int collideWithBoss(double bossX, double bossY, int& bossLastHitBySW, int& bossBonusHp, int& bossHp,
-                        int& bossFlashTimer, ParticleManager& pm, AudioEngine* audio) {
+                        int& bossFlashTimer, Ch1ParticleManager& pm, AudioEngine* audio) {
         int dmgDealt = 0;
         for (auto& sw : shockwaves) {
             if (!sw.active) continue;
@@ -1202,317 +1237,18 @@ public:
 
     void removeInactive() {
         shockwaves.erase(std::remove_if(shockwaves.begin(), shockwaves.end(),
-            [](const Shockwave& sw){ return !sw.active; }), shockwaves.end());
+            [](const Ch1Shockwave& sw){ return !sw.active; }), shockwaves.end());
     }
 
-    std::vector<Shockwave>& all() { return shockwaves; }
+    std::vector<Ch1Shockwave>& all() { return shockwaves; }
     int getLevel() const { return damage - 2; }
     void setPending(bool p) { pending = p; }
 };
 
-// ============== DanmakuManager (Chapter 2) ==============
-class DanmakuManager {
-    DanmakuEnemy enemy;
-    std::vector<DanmakuBullet> bullets;
-    int playerHP;
-    bool gameOver;
-    float energyFill;  // 0.0–1.0, for Ch2 energy bar
 
-public:
-    DanmakuManager() : playerHP(3), gameOver(false), energyFill(0.0f) { enemy.active = false; enemy.defeated = false; }
-
-    void reset() {
-        enemy.active = false; enemy.defeated = false;
-        bullets.clear(); playerHP = 3; gameOver = false;
-    }
-
-    void spawnEnemy() {
-        enemy.active = true; enemy.defeated = false;
-        enemy.x = WIN_WIDTH + 60; enemy.y = WIN_HEIGHT / 2;
-        enemy.targetX = 550;
-        enemy.hp = 50; enemy.maxHp = 50;
-        enemy.entering = true;
-        enemy.enterFrame = 0; enemy.enterDuration = 90;
-        enemy.invincibleFrames = 0;
-        enemy.vulnTimer = 0;
-        enemy.fireTimer = 0; enemy.fireInterval = 6;
-        enemy.fireAngle = 0;
-        bullets.clear();
-    }
-
-    void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
-                int& score, const Player& player, FloatingTextManager& ftMgr) {
-        if (enemy.defeated) {
-            if (enemy.defeatTimer > 0) {
-                enemy.defeatTimer--;
-                if (enemy.defeatTimer == 0) {
-                    particleMgr.spawnExplosion(enemy.x, enemy.y, 30);
-                    particleMgr.spawnExplosion(enemy.x-14, enemy.y-6, 18);
-                    particleMgr.spawnExplosion(enemy.x+14, enemy.y+6, 18);
-                    particleMgr.spawnExplosion(enemy.x, enemy.y-10, 12);
-                    particleMgr.spawnExplosion(enemy.x+5, enemy.y+12, 12);
-                    audio.sndExplosionBig();
-                }
-            }
-            // Bullets persist after defeat — keep moving + collision
-            updateBullets(bulletMgr, particleMgr, audio, score, player, ftMgr, false);
-            return;
-        }
-        if (!enemy.active) return;
-
-        if (enemy.entering) {
-            enemy.enterFrame++;
-            double raw = (double)enemy.enterFrame / enemy.enterDuration;
-            double eased = 1.0 - std::pow(1.0 - raw, 3.0);
-            enemy.x = WIN_WIDTH + 60 - eased * (WIN_WIDTH + 60 - enemy.targetX);
-            enemy.y = WIN_HEIGHT / 2;
-            if (enemy.enterFrame >= enemy.enterDuration) {
-                enemy.entering = false;
-                enemy.invincibleFrames = 300;
-                enemy.fireTimer = 0; enemy.fireAngle = 0;
-            }
-        } else if (enemy.invincibleFrames > 0) {
-            enemy.invincibleFrames--;
-            enemy.fireTimer++;
-            if (enemy.fireTimer >= 12) {  // half density
-                enemy.fireTimer = 0;
-                enemy.fireAngle += 0.35;
-                double speed = 1.5;
-                for (int s = 0; s < 2; ++s) {
-                    DanmakuBullet db;
-                    db.x = enemy.x; db.y = enemy.y;
-                    double a = enemy.fireAngle + s * M_PI;
-                    db.dx = std::cos(a) * speed;
-                    db.dy = std::sin(a) * speed;
-                    db.hp = 3; db.active = true;
-                    bullets.push_back(db);
-                }
-            }
-            if (enemy.invincibleFrames <= 0) enemy.vulnTimer = 180;  // 3 seconds
-        } else if (enemy.vulnTimer > 0) {
-            enemy.vulnTimer--;
-            if (enemy.vulnTimer <= 0 && enemy.hp > 0) {
-                enemy.invincibleFrames = 300; enemy.fireTimer = 0;
-            }
-        }
-
-        updateBullets(bulletMgr, particleMgr, audio, score, player, ftMgr, true);
-    }
-
-private:
-    void updateBullets(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
-                       int& score, const Player& player, FloatingTextManager& ftMgr, bool checkEnemy) {
-        // Move bullets
-        for (auto& db : bullets) {
-            if (!db.active) continue;
-            db.x += db.dx; db.y += db.dy;
-            if (db.x < -40 || db.x > WIN_WIDTH+40 || db.y < -40 || db.y > WIN_HEIGHT+40)
-                db.active = false;
-        }
-        bullets.erase(std::remove_if(bullets.begin(), bullets.end(),
-            [](const DanmakuBullet& db){ return !db.active; }), bullets.end());
-
-        // Collision: player bullets vs danmaku bullets
-        for (auto& b : bulletMgr.all()) {
-            if (!b.active || !b.canDamage) continue;
-            for (auto& db : bullets) {
-                if (!db.active) continue;
-                double dx = b.x - db.x, dy = b.y - db.y;
-                if (dx*dx + dy*dy < 10.0*10.0) {
-                    b.active = false; b.canDamage = false;
-                    db.hp--;
-                    if (db.hp <= 0) {
-                        db.active = false;
-                        particleMgr.spawnExplosion(db.x, db.y, 4);
-                        audio.sndCrystalCrush();
-                    } else {
-                        particleMgr.spawnExplosion(b.x, b.y, 2);
-                        audio.sndCrystalCrush();
-                    }
-                    break;
-                }
-            }
-        }
-
-        // Collision: player bullets vs enemy (skip if defeated)
-        if (checkEnemy && !enemy.entering && enemy.invincibleFrames <= 0 && enemy.vulnTimer > 0) {
-            for (auto& b : bulletMgr.all()) {
-                if (!b.active || !b.canDamage) continue;
-                double dx = b.x - enemy.x, dy = b.y - enemy.y;
-                if (dx*dx + dy*dy < 24.0*24.0) {
-                    b.active = false; b.canDamage = false;
-                    enemy.hp--;
-                    particleMgr.spawnExplosion(b.x, b.y, 3);
-                    audio.sndHit();
-                    if (enemy.hp <= 0) {
-                        enemy.defeated = true; enemy.active = false;
-                        enemy.defeatTimer = 70;
-                        score += 5;
-                    }
-                    break;
-                }
-            }
-        }
-
-        // Collision: player vs danmaku bullets
-        for (auto& db : bullets) {
-            if (!db.active) continue;
-            double dx = player.getX() - db.x, dy = player.getY() - db.y;
-            if (dx*dx + dy*dy < 16.0*16.0) {
-                db.active = false;
-                playerHP--;
-                particleMgr.spawnExplosion(db.x, db.y, 8);
-                audio.sndPlayerHit();
-                ftMgr.spawn((float)player.getX() + 1, (float)(player.getY() - 19),
-                            "HP -1", 0, 0, 0);  // shadow
-                ftMgr.spawn((float)player.getX(), (float)(player.getY() - 20),
-                            "HP -1", 255, 50, 50);
-                if (playerHP <= 0) { gameOver = true; playerHP = 0; }
-            }
-        }
-    }
-
-public:
-
-    void drawEnemy(SDL_Renderer* r) const {
-        if (!enemy.active && !enemy.defeated) return;
-        if (enemy.defeated && enemy.defeatTimer <= 0) return;  // done animating
-        int ex = (int)enemy.x, ey = (int)enemy.y;
-        // Flash/shake during defeat (longer, more dramatic)
-        if (enemy.defeated && enemy.defeatTimer > 0) {
-            if ((enemy.defeatTimer / 3) % 2) return;  // faster blink
-            int shake = (enemy.defeatTimer > 35) ? 6 : 3;
-            ex += (rand() % (shake*2+1)) - shake;
-            ey += (rand() % (shake*2+1)) - shake;
-        }
-        double scale = 0.7 + 0.3 * ((enemy.x - 500) / 300.0);
-        if (scale < 0.6) scale = 0.6; if (scale > 1.15) scale = 1.15;
-        int leg = (int)(16.0 * scale);
-        if (leg < 7) leg = 7;
-
-        // Entrance trail — fast swoosh (3 elongated afterimages + speed streaks)
-        if (enemy.entering && enemy.enterFrame > 1) {
-            for (int k = 1; k <= 3; ++k) {
-                double pastRaw = (double)(enemy.enterFrame - k * 2) / enemy.enterDuration;
-                if (pastRaw < 0) continue;
-                double pastEased = 1.0 - std::pow(1.0 - pastRaw, 3.0);
-                int pastX = (int)(WIN_WIDTH + 60 - pastEased * (WIN_WIDTH + 60 - enemy.targetX));
-                int alpha = 180 - k * 50;
-                if (alpha < 25) alpha = 25;
-                // Elongated horizontal blur (wider than tall for speed impression)
-                int bw = leg/2 + 3 - k, bh = leg/3 - k/2;
-                if (bw < 1) bw = 1; if (bh < 1) bh = 1;
-                SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)alpha);
-                for (int dxo = -bw; dxo <= bw; ++dxo)
-                    for (int dyo = -bh; dyo <= bh; ++dyo)
-                        if (dxo*dxo*bh*bh + dyo*dyo*bw*bw <= bw*bw*bh*bh)
-                            SDL_RenderDrawPoint(r, pastX + dxo, (int)enemy.y + dyo);
-                // Speed streaks extending rightward from each afterimage
-                SDL_SetRenderDrawColor(r, 140, 210, 255, (Uint8)(alpha*2/3));
-                SDL_RenderDrawLine(r, pastX + bw, (int)enemy.y - bh/2, pastX + bw + 12 - k*2, (int)enemy.y - bh/2);
-                SDL_RenderDrawLine(r, pastX + bw, (int)enemy.y + bh/2, pastX + bw + 8 - k, (int)enemy.y + bh/2);
-            }
-        }
-
-        int rCol, gCol, bCol;
-        if (enemy.entering || enemy.invincibleFrames > 0) {
-            rCol = 100; gCol = 180; bCol = 255;
-        } else {
-            double hpR = (double)enemy.hp / enemy.maxHp;
-            rCol = 255; gCol = (int)(150*hpR + 80*(1-hpR)); bCol = (int)(100*hpR + 30*(1-hpR));
-        }
-        SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
-
-        // Camera perspective: camera views corridor from near side.
-        // Depth goes into screen toward VP(CENTER_X, -60).
-        // Far side (upper-left) foreshortened, near side (lower-right) larger.
-        double depthFactor = (ex - 200) / 600.0;  // 0 at left, ~0.6 at right
-        if (depthFactor < 0.1) depthFactor = 0.1;
-        if (depthFactor > 0.7) depthFactor = 0.7;
-        int farLeg  = (int)(leg * (1.0 - depthFactor * 0.35));  // far (left) triangle smaller
-        int nearLeg = (int)(leg * (1.0 + depthFactor * 0.15));  // near (right) triangle larger
-        int vpLean = (int)(leg * depthFactor * 0.25);  // top leans toward VP
-
-        // Left triangle: far side (deeper in corridor), foreshortened
-        SDL_Point lt[3] = {
-            {ex - vpLean, ey},
-            {ex - farLeg, ey - farLeg + vpLean},
-            {ex - farLeg, ey + farLeg}
-        };
-        SDL_RenderDrawLines(r, lt, 3);
-        SDL_RenderDrawLine(r, lt[2].x, lt[2].y, lt[0].x, lt[0].y);
-
-        // Right triangle: near side (closer to camera), larger
-        SDL_Point rt[3] = {
-            {ex - vpLean, ey},
-            {ex + nearLeg, ey - nearLeg + vpLean},
-            {ex + nearLeg, ey + nearLeg}
-        };
-        SDL_RenderDrawLines(r, rt, 3);
-        SDL_RenderDrawLine(r, rt[2].x, rt[2].y, rt[0].x, rt[0].y);
-
-        if (!enemy.entering && enemy.invincibleFrames <= 0) {
-            int barW=50, barH=4, barX=ex-barW/2, barY=ey-leg-14;
-            SDL_SetRenderDrawColor(r, 30,30,30,255);
-            SDL_Rect bg={barX,barY,barW,barH}; SDL_RenderFillRect(r,&bg);
-            int hpW=(int)((double)enemy.hp/enemy.maxHp*barW);
-            SDL_SetRenderDrawColor(r, 220,30,30,255);
-            SDL_Rect hpR={barX,barY,hpW,barH}; SDL_RenderFillRect(r,&hpR);
-        }
-    }
-
-    void drawBullets(SDL_Renderer* r) const {
-        for (const auto& db : bullets) {
-            if (!db.active) continue;
-            int bx=(int)db.x, by=(int)db.y, rad=4;
-            double hpR=(double)db.hp/3.0;
-            SDL_SetRenderDrawColor(r, 180,60,200,(Uint8)(160+95*hpR));
-            SDL_RenderDrawLine(r,bx-rad,by,bx+rad,by);
-            SDL_RenderDrawLine(r,bx,by-rad,bx,by+rad);
-            SDL_RenderDrawLine(r,bx-2,by-2,bx+2,by+2);
-            SDL_RenderDrawLine(r,bx+2,by-2,bx-2,by+2);
-            SDL_SetRenderDrawColor(r, 220,140,240,200);
-            SDL_RenderDrawPoint(r,bx,by);
-        }
-    }
-
-    void drawHUD(SDL_Renderer* r, const Font& font, int score) const {
-        char buf[32];
-        snprintf(buf,sizeof(buf),"SCORE %d",score);
-        font.drawString(r,buf,WIN_WIDTH-160,10,2);
-        for (int i=0;i<3;++i) {
-            int hx=WIN_WIDTH-20-i*14;
-            SDL_SetRenderDrawColor(r,(i<playerHP)?255:70,20,20,255);
-            font.drawChar(r,'*',hx,28,2);
-        }
-        // Energy bar (Ch2 style — visually same as Ch1, separate functionality)
-        {
-            const int EBAR_X = WIN_WIDTH - 20 - (3-1)*14;    // left of hearts
-            const int EBAR_W = 3 * 14;                       // same width as 3 hearts
-            const int EBAR_Y = 46, EBAR_H = 6;
-            SDL_SetRenderDrawColor(r, 30, 30, 30, 255);
-            SDL_Rect ebg = {EBAR_X, EBAR_Y, EBAR_W, EBAR_H};
-            SDL_RenderFillRect(r, &ebg);
-            int fillW = (int)(energyFill * EBAR_W);
-            if (fillW > EBAR_W) fillW = EBAR_W;
-            if (fillW > 0) {
-                int green = (energyFill > 0.9f) ? 255 : (energyFill > 0.3f ? 180 : 100);
-                SDL_SetRenderDrawColor(r, 30, (Uint8)green, 50, 255);
-                SDL_Rect er = {EBAR_X, EBAR_Y, fillW, EBAR_H};
-                SDL_RenderFillRect(r, &er);
-            }
-        }
-    }
-
-    DanmakuEnemy& getEnemy() { return enemy; }
-    const std::vector<DanmakuBullet>& getBullets() const { return bullets; }
-    bool isGameOver() const { return gameOver; }
-    int getPlayerHP() const { return playerHP; }
-};
-
-// ============== AlienManager ==============
-class AlienManager {
-    std::vector<Alien> aliens;
+// ============== Ch1AlienManager ==============
+class Ch1AlienManager {
+    std::vector<Ch1Alien> aliens;
     int spawnTimer;
     double baseSpeed;
     int spawnInterval;
@@ -1521,7 +1257,7 @@ class AlienManager {
     int hpBonus;  // per-chapter override for alien HP
 
 public:
-    AlienManager() : spawnTimer(0), baseSpeed(1.75), spawnInterval(110), hpBonus(0) {}
+    Ch1AlienManager() : spawnTimer(0), baseSpeed(1.75), spawnInterval(110), hpBonus(0) {}
 
     void reset() {
         aliens.clear(); spawnTimer = 0; baseSpeed = 1.75;
@@ -1547,7 +1283,7 @@ public:
     }
 
     void spawnAlien(int score) {
-        Alien a;
+        Ch1Alien a;
         a.targetT = 0.15 + (rand() % 700) / 1000.0;
         a.enterFrame = 0;
         a.enterDuration = 20 + rand() % 25;
@@ -1584,7 +1320,7 @@ public:
     }
 
     void spawnAlienFromBoss(double bossX, double bossY, int score) {
-        Alien a;
+        Ch1Alien a;
         a.startT = (bossX - perspLeft(bossY)) / perspWidth(bossY);
         if (a.startT < 0.1) a.startT = 0.1;
         if (a.startT > 0.9) a.startT = 0.9;
@@ -1612,7 +1348,7 @@ public:
     }
 
     void update(bool duringBossAbsorb, double speedFactor, bool& gameOver, int& baseHP,
-                ParticleManager& pm, AudioEngine* audio) {
+                Ch1ParticleManager& pm, AudioEngine* audio) {
         const double A = WIN_WIDTH / 2.0 - 15.0;
         const double B = 75.0;
         for (auto& a : aliens) {
@@ -1719,10 +1455,10 @@ public:
 
     void removeInactive() {
         aliens.erase(std::remove_if(aliens.begin(), aliens.end(),
-            [](const Alien& a){ return !a.active; }), aliens.end());
+            [](const Ch1Alien& a){ return !a.active; }), aliens.end());
     }
 
-    std::vector<Alien>& all() { return aliens; }
+    std::vector<Ch1Alien>& all() { return aliens; }
     int countAlive() const {
         int c = 0;
         for (const auto& a : aliens) if (a.active) c++;
@@ -1733,8 +1469,9 @@ public:
     int& spawnTimerRef() { return spawnTimer; }
 };
 
-// ============== Boss ==============
-class Boss {
+
+// ============== Ch1Boss ==============
+class Ch1Boss {
     // Core state
     double y;
     int hp, maxHp, bonusHp;
@@ -1766,21 +1503,21 @@ private:
     bool healWavesEnabled;
 
     // Heal wave system
-    std::vector<HealWave> healWaves;
+    std::vector<Ch1HealWave> healWaves;
     int healWaveTimer;
-    int nextHealWaveID;
+    int nextCh1HealWaveID;
 
     // Config
     const BossConfig* cfg;
 
 public:
-    Boss() : y(-300), hp(1000), maxHp(1000), bonusHp(0), active(false),
+    Ch1Boss() : y(-300), hp(1000), maxHp(1000), bonusHp(0), active(false),
              x(CENTER_X), moveTime(0), flashTimer(0), lastHitBySW(-1),
              entering(false), enterFrame(0), enterDuration(150),
              phase2Triggered(false), shakeTimer(0), shakeX(0), shakeY(0),
              absorbTimer(0), absorbIndex(0), absorbCooldown(0),
              absorbState(IDLE), absorbTargetIdx(-1), postAbsorbTimer(0),
-             healWavesEnabled(false), healWaveTimer(0), nextHealWaveID(0), cfg(nullptr) {}
+             healWavesEnabled(false), healWaveTimer(0), nextCh1HealWaveID(0), cfg(nullptr) {}
 
     void setConfig(const BossConfig* c) { cfg = c; }
 
@@ -1791,7 +1528,7 @@ public:
         phase2Triggered = false; shakeTimer = 0; shakeX = shakeY = 0;
         absorbTimer = 0; absorbIndex = 0; absorbCooldown = 0;
         absorbState = IDLE; absorbTargetIdx = -1; postAbsorbTimer = 0;
-        healWavesEnabled = false; healWaveTimer = 0; nextHealWaveID = 0;
+        healWavesEnabled = false; healWaveTimer = 0; nextCh1HealWaveID = 0;
         healWaves.clear();
     }
 
@@ -1815,8 +1552,8 @@ public:
     int& bonusHpRef() { return bonusHp; }
     int& hpRef() { return hp; }
     bool isPhase2Triggered() const { return phase2Triggered; }
-    bool isHealWavesEnabled() const { return healWavesEnabled; }
-    std::vector<HealWave>& getHealWaves() { return healWaves; }
+    bool isCh1HealWavesEnabled() const { return healWavesEnabled; }
+    std::vector<Ch1HealWave>& getCh1HealWaves() { return healWaves; }
 
     void takeDamage(int dmg) {
         flashTimer = 5;
@@ -1840,7 +1577,7 @@ public:
         phase2Triggered = false;
         absorbTimer = 0; absorbIndex = 0; absorbCooldown = 0;
         absorbState = IDLE; absorbTargetIdx = -1; postAbsorbTimer = 0;
-        healWavesEnabled = false; healWaveTimer = 0; nextHealWaveID = 0;
+        healWavesEnabled = false; healWaveTimer = 0; nextCh1HealWaveID = 0;
         healWaves.clear();
         x = CENTER_X; moveTime = 0;
     }
@@ -1883,13 +1620,13 @@ public:
         if (flashTimer > 0) flashTimer--;
     }
 
-    void updateHealWaves(ParticleManager& pm, AlienManager& aliens, AudioEngine* audio) {
+    void updateCh1HealWaves(Ch1ParticleManager& pm, Ch1AlienManager& aliens, AudioEngine* audio) {
         if (!healWavesEnabled) return;
         healWaveTimer++;
         int interval = cfg ? cfg->healWaveInterval : 420;
         if (healWaveTimer >= interval) {
             healWaveTimer = 0;
-            HealWave hw; hw.radius = 15; hw.id = nextHealWaveID++; hw.active = true;
+            Ch1HealWave hw; hw.radius = 15; hw.id = nextCh1HealWaveID++; hw.active = true;
             healWaves.push_back(hw);
         }
         for (auto& hw : healWaves) {
@@ -1913,7 +1650,7 @@ public:
                     int barEndX = CENTER_X - 200 + (int)((double)(hp + bonusHp) / maxHp * 400);
                     if (barEndX > WIN_WIDTH) barEndX = WIN_WIDTH;
                     for (int i = 0; i < 10; ++i) {
-                        Particle p;
+                        Ch1Particle p;
                         p.x = ax + (rand()%10-5); p.y = a.y + (rand()%10-5);
                         p.vx = (barEndX - p.x) / 60.0 + (rand()%10-5)/10.0;
                         p.vy = (16 - p.y) / 30.0 + (rand()%10-5)/10.0;
@@ -1925,12 +1662,12 @@ public:
             }
         }
         healWaves.erase(std::remove_if(healWaves.begin(), healWaves.end(),
-            [](const HealWave& hw){ return !hw.active; }), healWaves.end());
+            [](const Ch1HealWave& hw){ return !hw.active; }), healWaves.end());
     }
 
     // Shared absorb state machine (deduplicated from INTRO and PHASE2)
-    bool updateAbsorbStateMachine(AlienManager& aliens, BulletManager& bullets,
-                                   ParticleManager& pm, AudioEngine* audio) {
+    bool updateAbsorbStateMachine(Ch1AlienManager& aliens, Ch1BulletManager& bullets,
+                                   Ch1ParticleManager& pm, AudioEngine* audio) {
         if (absorbCooldown > 0) absorbCooldown--;
 
         if (absorbState == IDLE) {
@@ -1939,7 +1676,7 @@ public:
                 if (aliens.all()[i].active && !aliens.all()[i].beingAbsorbed) { idx = i; break; }
             }
             if (idx >= 0) {
-                Alien& a = aliens.all()[idx];
+                Ch1Alien& a = aliens.all()[idx];
                 double ax = perspLeft(a.y) + a.t * perspWidth(a.y);
                 bullets.addBossBeam(x, y, ax, a.y, idx);
                 absorbTargetIdx = idx;
@@ -1974,7 +1711,7 @@ public:
     }
 
     // Shared absorb animation (deduplicated)
-    void updateAbsorbAnimations(AlienManager& aliens, ParticleManager& pm) {
+    void updateAbsorbAnimations(Ch1AlienManager& aliens, Ch1ParticleManager& pm) {
         for (auto& a : aliens.all()) {
             if (!a.active || !a.beingAbsorbed) continue;
             a.absorbFrame++;
@@ -1987,7 +1724,7 @@ public:
                 int barEndX = CENTER_X - 200 + (int)((double)(hp + bonusHp) / maxHp * 400);
                 if (barEndX > WIN_WIDTH) barEndX = WIN_WIDTH;
                 for (int i = 0; i < 12; ++i) {
-                    Particle p;
+                    Ch1Particle p;
                     p.x = x + (rand()%30-15); p.y = y + (rand()%20-10);
                     p.vx = (barEndX - p.x) / 60.0 + (rand()%10-5)/10.0;
                     p.vy = (16 - p.y) / 60.0 + (rand()%10-5)/10.0;
@@ -2030,7 +1767,7 @@ public:
         }
     }
 
-    void drawHealWaves(SDL_Renderer* renderer) const {
+    void drawCh1HealWaves(SDL_Renderer* renderer) const {
         for (const auto& hw : healWaves) {
             if (!hw.active) continue;
             SDL_SetRenderDrawColor(renderer, 255, 60, 60, 80);
@@ -2131,17 +1868,18 @@ public:
     bool& enteringRef() { return entering; }
     AbsorbState& absorbStateRef() { return absorbState; }
     int& absorbTargetIdxRef() { return absorbTargetIdx; }
-    void setHealWavesEnabled(bool v) { healWavesEnabled = v; }
+    void setCh1HealWavesEnabled(bool v) { healWavesEnabled = v; }
     void setLastHitBySW(int id) { lastHitBySW = id; }
 };
 
-// ============== Background ==============
-class Background {
+
+// ============== Ch1Background ==============
+class Ch1Background {
     std::vector<Star> stars;
     const ChapterConfig& chapterCfg;
 
 public:
-    Background(const ChapterConfig& cfg) : chapterCfg(cfg) {
+    Ch1Background(const ChapterConfig& cfg) : chapterCfg(cfg) {
         for (int i = 0; i < cfg.starCount; ++i)
             stars.push_back({(float)(rand() % WIN_WIDTH), (float)(rand() % cfg.horizonY),
                              (rand() % 628) / 100.0f, 0.01f + (rand() % 40) / 1000.0f,
@@ -2228,8 +1966,9 @@ public:
     }
 };
 
-// ============== SideScrollingBackground ==============
-class SideScrollingBackground {
+
+// ============== Ch2Background ==============
+class Ch2Background {
 private:
     struct Star2 { double wx, wy; float phase, twinkleSpeed; bool isCross; };
     struct Pillar { double wx; bool isMajor; };
@@ -2312,7 +2051,7 @@ private:
     }
 
 public:
-    SideScrollingBackground() : scrollX(0), scrollSpeed(3.5), genNext(-200.0) {
+    Ch2Background() : scrollX(0), scrollSpeed(3.5), genNext(-200.0) {
         genStars();
         for (int t = 0; t < N_SEAM_TRACKS; ++t) {
             double frac = (double)(t + 1) / (N_SEAM_TRACKS + 1);
@@ -2516,6 +2255,510 @@ private:
     }
 };
 
+
+// ============== Ch2ShooterBase (shared enemy bullet system) ==============
+class Ch2ShooterBase {
+protected:
+    std::vector<Ch2EnemyBullet> bullets;
+    int playerHP;
+    bool gameOver;
+
+    void updateBullets(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
+                       Ch1Player& player, FloatingTextManager& ftMgr) {
+        for (auto& b : bullets) {
+            if (!b.active) continue;
+            b.x += b.dx; b.y += b.dy;
+            if (b.x < -20 || b.x > WIN_WIDTH+20 || b.y < -20 || b.y > WIN_HEIGHT+20) b.active = false;
+        }
+        bullets.erase(std::remove_if(bullets.begin(), bullets.end(),
+            [](const Ch2EnemyBullet& b){ return !b.active; }), bullets.end());
+        // Player bullets vs enemy bullets
+        for (auto& b : bulletMgr.all()) {
+            if (!b.active || !b.canDamage) continue;
+            for (auto& eb : bullets) {
+                if (!eb.active) continue;
+                if (std::abs(b.x-eb.x) < 10 && std::abs(b.y-eb.y) < 10) {
+                    b.active = false; b.canDamage = false; eb.hp--;
+                    if (eb.hp <= 0) { eb.active = false; particleMgr.spawnExplosion(eb.x, eb.y, 4); audio.sndCrystalCrush(); }
+                    break;
+                }
+            }
+        }
+        // Player vs enemy bullets (skip if player invincible)
+        if (player.getInvFrames() <= 0) {
+            for (auto& eb : bullets) {
+                if (!eb.active) continue;
+                double dx = player.getX() - eb.x, dy = player.getY() - eb.y;
+                if (dx*dx + dy*dy < 16.0*16.0) {
+                    eb.active = false; playerHP--;
+                    player.setInvFrames(60);  // 1 second invincibility
+                    particleMgr.spawnExplosion(eb.x, eb.y, 8); audio.sndPlayerHit();
+                    ftMgr.spawn((float)player.getX()+1, (float)(player.getY()-19), "HP -1", 0,0,0);
+                    ftMgr.spawn((float)player.getX(), (float)(player.getY()-20), "HP -1", 255,50,50);
+                    if (playerHP <= 0) { gameOver = true; playerHP = 0; }
+                }
+            }
+        }
+    }
+
+public:
+    Ch2ShooterBase() : playerHP(3), gameOver(false) {}
+    bool isGameOver() const { return gameOver; }
+    int getPlayerHP() const { return playerHP; }
+    const std::vector<Ch2EnemyBullet>& getBullets() const { return bullets; }
+    void resetBase() { bullets.clear(); playerHP = 3; gameOver = false; }
+
+    void drawBullets(SDL_Renderer* r) const {
+        for (const auto& b : bullets) {
+            if (!b.active) continue;
+            int bx=(int)b.x, by=(int)b.y, rad=4;
+            double hpR=(double)b.hp/3.0;
+            SDL_SetRenderDrawColor(r, 180,60,200,(Uint8)(160+95*hpR));
+            SDL_RenderDrawLine(r,bx-rad,by,bx+rad,by);
+            SDL_RenderDrawLine(r,bx,by-rad,bx,by+rad);
+            SDL_RenderDrawLine(r,bx-2,by-2,bx+2,by+2);
+            SDL_RenderDrawLine(r,bx+2,by-2,bx-2,by+2);
+            SDL_SetRenderDrawColor(r, 220,140,240,200);
+            SDL_RenderDrawPoint(r,bx,by);
+        }
+    }
+
+};
+
+// ============== HUDBase (shared HUD drawing) ==============
+class HUDBase {
+public:
+    // rightEdge = rightmost pixel of the HUD column (all elements aligned)
+    static void drawScore(SDL_Renderer* r, const Font& font, int score, int rightEdge, int y) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "SCORE:%-4d", score);
+        font.drawString(r, buf, rightEdge - 120, y, 2);  // 10 chars * 12px = 120px
+    }
+    static void drawHPHearts(SDL_Renderer* r, const Font& font, int hp, int maxHp, int rightEdge, int y) {
+        for (int i = 0; i < maxHp; ++i) {
+            int hx = rightEdge - 12 - i * 14;  // char is 12px wide at scale 2
+            SDL_SetRenderDrawColor(r, (i < hp) ? 255 : 70, 20, 20, 255);
+            font.drawChar(r, '*', hx, y, 2);
+        }
+    }
+    static void drawEnergyBar(SDL_Renderer* r, int rightEdge, int y, int w, int h, float fill) {
+        int x = rightEdge - w;
+        SDL_SetRenderDrawColor(r, 30, 30, 30, 255);
+        SDL_Rect bg = {x, y, w, h}; SDL_RenderFillRect(r, &bg);
+        int fw = (int)(fill * w); if (fw > w) fw = w;
+        if (fw > 0) {
+            int green = (fill > 0.9f) ? 255 : (fill > 0.3f ? 180 : 100);
+            SDL_SetRenderDrawColor(r, 30, (Uint8)green, 50, 255);
+            SDL_Rect fr = {x, y, fw, h}; SDL_RenderFillRect(r, &fr);
+        }
+    }
+};
+
+// ============== Ch2DanmakuManager (Chapter 2) ==============
+class Ch2DanmakuManager : public Ch2ShooterBase {
+    Ch2DanmakuEnemy enemy;
+    float energyFill;
+
+public:
+    Ch2DanmakuManager() : energyFill(0.0f) { enemy.active = false; enemy.defeated = false; }
+
+    void reset() {
+        enemy.active = false; enemy.defeated = false;
+        resetBase();
+    }
+
+    void spawnEnemy() {
+        enemy.active = true; enemy.defeated = false;
+        // Enter diagonally from top-right corner
+        enemy.startX = WIN_WIDTH + 40; enemy.startY = -40;
+        enemy.targetX = 450; enemy.targetY = 280;
+        enemy.x = enemy.startX; enemy.y = enemy.startY;
+        enemy.baseX = enemy.targetX; enemy.baseY = enemy.targetY;
+        enemy.movePhase = 0;
+        enemy.hp = 50; enemy.maxHp = 50;
+        enemy.entering = true;
+        enemy.enterFrame = 0; enemy.enterDuration = 35;
+        enemy.invincibleFrames = 0;
+        enemy.vulnTimer = 0;
+        enemy.fireTimer = 0; enemy.fireInterval = 6;
+        enemy.fireAngle = 0;
+        bullets.clear();
+    }
+
+    void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
+                int& score, Ch1Player& player, FloatingTextManager& ftMgr) {
+        if (enemy.defeated) {
+            if (enemy.defeatTimer > 0) {
+                enemy.defeatTimer--;
+                if (enemy.defeatTimer == 0) {
+                    particleMgr.spawnExplosion(enemy.x, enemy.y, 30);
+                    particleMgr.spawnExplosion(enemy.x-14, enemy.y-6, 18);
+                    particleMgr.spawnExplosion(enemy.x+14, enemy.y+6, 18);
+                    particleMgr.spawnExplosion(enemy.x, enemy.y-10, 12);
+                    particleMgr.spawnExplosion(enemy.x+5, enemy.y+12, 12);
+                    audio.sndExplosionBig();
+                }
+            }
+            Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
+            return;
+        }
+        if (!enemy.active) return;
+
+        if (enemy.entering) {
+            // Diagonal swoop from top-right corner to target (cubic ease-out)
+            enemy.enterFrame++;
+            double raw = (double)enemy.enterFrame / enemy.enterDuration;
+            double eased = 1.0 - std::pow(1.0 - raw, 3.0);
+            enemy.x = enemy.startX + (enemy.targetX - enemy.startX) * eased;
+            enemy.y = enemy.startY + (enemy.targetY - enemy.startY) * eased;
+            if (enemy.enterFrame >= enemy.enterDuration) {
+                enemy.entering = false;
+                enemy.invincibleFrames = 300;
+                enemy.fireTimer = 0; enemy.fireAngle = 0;
+                enemy.baseX = enemy.targetX; enemy.baseY = enemy.targetY;
+                enemy.movePhase = 0;
+            }
+        } else {
+            // Slow oscillation along perspective ray from VP (400, -60)
+            // Moving toward VP = away from camera (smaller), away from VP = toward camera (larger)
+            enemy.movePhase += 0.007;
+            double osc = std::sin(enemy.movePhase) * 55.0;  // amplitude 55px along perspective ray
+            double vdx = enemy.baseX - 400;  // direction from VP to base
+            double vdy = enemy.baseY + 60;
+            double vlen = std::sqrt(vdx*vdx + vdy*vdy);
+            if (vlen < 1.0) vlen = 1.0;
+            double nx = vdx / vlen, ny = vdy / vlen;
+            enemy.x = enemy.baseX + nx * osc;
+            enemy.y = enemy.baseY + ny * osc;
+
+            if (enemy.invincibleFrames > 0) {
+                enemy.invincibleFrames--;
+                enemy.fireTimer++;
+                if (enemy.fireTimer >= 6) {
+                    enemy.fireTimer = 0;
+                    enemy.fireAngle += 0.35;
+                    double speed = 1.5;
+                    for (int s = 0; s < 2; ++s) {
+                        Ch2EnemyBullet db;
+                        db.x = enemy.x; db.y = enemy.y;
+                        double a = enemy.fireAngle + s * M_PI;
+                        db.dx = std::cos(a) * speed;
+                        db.dy = std::sin(a) * speed;
+                        db.hp = 3; db.active = true;
+                        bullets.push_back(db);
+                    }
+                }
+                if (enemy.invincibleFrames <= 0) enemy.vulnTimer = 180;  // 3 seconds
+            } else if (enemy.vulnTimer > 0) {
+                enemy.vulnTimer--;
+                if (enemy.vulnTimer <= 0 && enemy.hp > 0) {
+                    enemy.invincibleFrames = 300; enemy.fireTimer = 0;
+                }
+            }
+        }
+
+        computeLegs();
+        // Base class handles bullet movement + player-vs-bullet collisions
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
+        // Danmaku-specific: player bullets vs enemy AABB
+        if (!enemy.entering && enemy.invincibleFrames <= 0 && enemy.vulnTimer > 0) {
+            int fl = enemy.farLeg, nl = enemy.nearLeg, vl = enemy.vpLean;
+            int ex = (int)enemy.x, ey = (int)enemy.y;
+            for (auto& b : bulletMgr.all()) {
+                if (!b.active || !b.canDamage) continue;
+                int bx = (int)b.x, by = (int)b.y;
+                if (bx >= ex - fl && bx <= ex + nl && by >= ey - nl + vl && by <= ey + nl) {
+                    b.active = false; b.canDamage = false; enemy.hp--;
+                    particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
+                    if (enemy.hp <= 0) {
+                        enemy.defeated = true; enemy.active = false;
+                        enemy.defeatTimer = 70; score += 5;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+private:
+    void computeLegs() {
+        // Scale based on distance from VP (400, -60): far=small, near=large
+        double dx = enemy.x - 400, dy = enemy.y + 60;
+        double dist = std::sqrt(dx*dx + dy*dy);
+        double scale = 0.55 + 0.45 * (dist / 340.0);
+        if (scale < 0.50) scale = 0.50;
+        if (scale > 1.25) scale = 1.25;
+        int leg = (int)(16.0 * scale);
+        if (leg < 6) leg = 6;
+        double depthFactor = (enemy.x - 200) / 600.0;
+        if (depthFactor < 0.1) depthFactor = 0.1;
+        if (depthFactor > 0.7) depthFactor = 0.7;
+        enemy.leg = leg;
+        enemy.farLeg  = (int)(leg * (1.0 - depthFactor * 0.35));
+        enemy.nearLeg = (int)(leg * (1.0 + depthFactor * 0.15));
+        enemy.vpLean  = (int)(leg * depthFactor * 0.25);
+    }
+
+    void drawEnemy(SDL_Renderer* r) const {
+        if (!enemy.active && !enemy.defeated) return;
+        if (enemy.defeated && enemy.defeatTimer <= 0) return;
+        int ex = (int)enemy.x, ey = (int)enemy.y;
+        if (enemy.defeated && enemy.defeatTimer > 0) {
+            if ((enemy.defeatTimer / 3) % 2) return;
+            int shake = (enemy.defeatTimer > 35) ? 6 : 3;
+            ex += (rand() % (shake*2+1)) - shake;
+            ey += (rand() % (shake*2+1)) - shake;
+        }
+
+        // Entrance trail — particle-like blue dots along diagonal path
+        if (enemy.entering && enemy.enterFrame > 3) {
+            for (int k = 1; k <= 5; ++k) {
+                double pastRaw = (double)(enemy.enterFrame - k * 2) / enemy.enterDuration;
+                if (pastRaw < 0) continue;
+                double pastEased = 1.0 - std::pow(1.0 - pastRaw, 3.0);
+                int pastX = (int)(enemy.startX + (enemy.targetX - enemy.startX) * pastEased);
+                int pastY = (int)(enemy.startY + (enemy.targetY - enemy.startY) * pastEased);
+                int alpha = 160 - k * 27;
+                SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)alpha);
+                SDL_RenderDrawPoint(r, pastX, pastY);
+                SDL_RenderDrawPoint(r, pastX-1, pastY);
+                SDL_RenderDrawPoint(r, pastX+1, pastY);
+                SDL_RenderDrawPoint(r, pastX, pastY-1);
+                SDL_RenderDrawPoint(r, pastX, pastY+1);
+            }
+        }
+
+        int rCol, gCol, bCol;
+        if (enemy.entering || enemy.invincibleFrames > 0) {
+            rCol = 100; gCol = 180; bCol = 255;
+        } else {
+            double hpR = (double)enemy.hp / enemy.maxHp;
+            rCol = 255; gCol = (int)(150*hpR + 80*(1-hpR)); bCol = (int)(100*hpR + 30*(1-hpR));
+        }
+        SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
+
+        int farLeg = enemy.farLeg, nearLeg = enemy.nearLeg, vpLean = enemy.vpLean;
+
+        // Left triangle: far side (deeper in corridor), foreshortened
+        SDL_Point lt[3] = {
+            {ex - vpLean, ey},
+            {ex - farLeg, ey - farLeg + vpLean},
+            {ex - farLeg, ey + farLeg}
+        };
+        SDL_RenderDrawLines(r, lt, 3);
+        SDL_RenderDrawLine(r, lt[2].x, lt[2].y, lt[0].x, lt[0].y);
+
+        // Right triangle: near side (closer to camera), larger
+        SDL_Point rt[3] = {
+            {ex - vpLean, ey},
+            {ex + nearLeg, ey - nearLeg + vpLean},
+            {ex + nearLeg, ey + nearLeg}
+        };
+        SDL_RenderDrawLines(r, rt, 3);
+        SDL_RenderDrawLine(r, rt[2].x, rt[2].y, rt[0].x, rt[0].y);
+
+        if (!enemy.entering && enemy.invincibleFrames <= 0) {
+            int barW=50, barH=4, barX=ex-barW/2, barY=ey-enemy.leg-14;
+            SDL_SetRenderDrawColor(r, 30,30,30,255);
+            SDL_Rect bg={barX,barY,barW,barH}; SDL_RenderFillRect(r,&bg);
+            int hpW=(int)((double)enemy.hp/enemy.maxHp*barW);
+            SDL_SetRenderDrawColor(r, 220,30,30,255);
+            SDL_Rect hpR={barX,barY,hpW,barH}; SDL_RenderFillRect(r,&hpR);
+        }
+    }
+
+    void drawBullets(SDL_Renderer* r) const {
+        for (const auto& db : bullets) {
+            if (!db.active) continue;
+            int bx=(int)db.x, by=(int)db.y, rad=4;
+            double hpR=(double)db.hp/3.0;
+            SDL_SetRenderDrawColor(r, 180,60,200,(Uint8)(160+95*hpR));
+            SDL_RenderDrawLine(r,bx-rad,by,bx+rad,by);
+            SDL_RenderDrawLine(r,bx,by-rad,bx,by+rad);
+            SDL_RenderDrawLine(r,bx-2,by-2,bx+2,by+2);
+            SDL_RenderDrawLine(r,bx+2,by-2,bx-2,by+2);
+            SDL_SetRenderDrawColor(r, 220,140,240,200);
+            SDL_RenderDrawPoint(r,bx,by);
+        }
+    }
+
+    void drawHUD(SDL_Renderer* r, const Font& font, int score) const {
+        char buf[32];
+        snprintf(buf,sizeof(buf),"SCORE %d",score);
+        font.drawString(r,buf,WIN_WIDTH-160,10,2);
+        for (int i=0;i<3;++i) {
+            int hx=WIN_WIDTH-20-i*14;
+            SDL_SetRenderDrawColor(r,(i<playerHP)?255:70,20,20,255);
+            font.drawChar(r,'*',hx,28,2);
+        }
+        // Energy bar (Ch2 style — visually same as Ch1, separate functionality)
+        {
+            const int EBAR_X = WIN_WIDTH - 20 - (3-1)*14;    // left of hearts
+            const int EBAR_W = 3 * 14;                       // same width as 3 hearts
+            const int EBAR_Y = 46, EBAR_H = 6;
+            SDL_SetRenderDrawColor(r, 30, 30, 30, 255);
+            SDL_Rect ebg = {EBAR_X, EBAR_Y, EBAR_W, EBAR_H};
+            SDL_RenderFillRect(r, &ebg);
+            int fillW = (int)(energyFill * EBAR_W);
+            if (fillW > EBAR_W) fillW = EBAR_W;
+            if (fillW > 0) {
+                int green = (energyFill > 0.9f) ? 255 : (energyFill > 0.3f ? 180 : 100);
+                SDL_SetRenderDrawColor(r, 30, (Uint8)green, 50, 255);
+                SDL_Rect er = {EBAR_X, EBAR_Y, fillW, EBAR_H};
+                SDL_RenderFillRect(r, &er);
+            }
+        }
+    }
+
+    Ch2DanmakuEnemy& getEnemy() { return enemy; }
+    const std::vector<Ch2EnemyBullet>& getBullets() const { return bullets; }
+    bool isGameOver() const { return gameOver; }
+    int getPlayerHP() const { return playerHP; }
+};
+
+
+// ============== Ch2AlienManager (Chapter 2 regular alien) ==============
+struct Ch2Alien : EnemyData {
+    double x, y, startX, startY, targetX, targetY;
+    int fireVolleyTimer, fireBurstCount, fireBurstTimer;
+};
+
+class Ch2AlienManager : public Ch2ShooterBase {
+    static const int ALIEN_HP = 10;
+    static const int VOLNEY_COOLDOWN = 180;
+    static const int BURST_INTERVAL = 8;
+    static const int BURST_COUNT = 5;
+
+    Ch2Alien alien;
+    bool hasSpawned;
+
+    void fireBullet(Ch1Player& player) {
+        double dx = player.getX() - alien.x, dy = player.getY() - alien.y;
+        double d = std::sqrt(dx*dx + dy*dy); if (d < 1) d = 1;
+        Ch2EnemyBullet b;
+        b.x = alien.x; b.y = alien.y;
+        b.dx = dx / d * 1.5; b.dy = dy / d * 1.5;
+        b.hp = 3; b.active = true;
+        bullets.push_back(b);
+    }
+
+public:
+    Ch2AlienManager() : hasSpawned(false) {
+        alien.active = false; alien.defeated = false;
+    }
+    void reset() { alien.active = false; alien.defeated = false; resetBase(); hasSpawned = false; }
+    Ch2Alien& getAlien() { return alien; }
+
+    void spawnIfNeeded() {
+        if (hasSpawned || alien.active || alien.defeated) return;
+        hasSpawned = true;
+        alien.targetX = 640 + rand() % 141;  // 640-780, between invisible wall (630) and right edge (800)
+        alien.targetY = 40 + rand() % 521;
+        int side = rand() % 4;
+        if (side == 0)      { alien.startX = 660; alien.startY = 40 + rand() % 521; }
+        else if (side == 1) { alien.startX = -10; alien.startY = 40 + rand() % 521; }
+        else if (side == 2) { alien.startX = 120 + rand() % 481; alien.startY = -10; }
+        else                { alien.startX = 120 + rand() % 481; alien.startY = 610; }
+        alien.x = alien.startX; alien.y = alien.startY;
+        alien.hp = ALIEN_HP;
+        alien.active = true; alien.entering = true; alien.defeated = false;
+        alien.enterFrame = 0;
+        alien.enterDuration = 20 + rand() % 26;
+        alien.invincibleFrames = 0;
+        alien.fireVolleyTimer = 0; alien.fireBurstCount = 0; alien.fireBurstTimer = 0;
+    }
+
+    void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
+                int& score, Ch1Player& player, FloatingTextManager& ftMgr) {
+        if (!alien.active && !alien.defeated) return;
+        if (alien.defeated) {
+            Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
+            if (bullets.empty()) alien.defeated = false;
+            return;
+        }
+        if (alien.entering) {
+            alien.enterFrame++;
+            double raw = (double)alien.enterFrame / alien.enterDuration;
+            double eased = 1.0 - std::pow(1.0 - raw, 3.0);
+            if (raw >= 1.0) { raw = 1.0; eased = 1.0; alien.entering = false; alien.invincibleFrames = 3; alien.fireVolleyTimer = 0; }
+            alien.x = alien.startX + (alien.targetX - alien.startX) * eased;
+            alien.y = alien.startY + (alien.targetY - alien.startY) * eased;
+            return;
+        }
+        if (alien.invincibleFrames > 0) {
+            alien.invincibleFrames--;
+            if (alien.invincibleFrames <= 0) alien.fireVolleyTimer = 0;
+        } else {
+            alien.x -= 0.35;
+            if (alien.x < -40) { alien.active = false; alien.defeated = true; return; }
+            if (alien.fireBurstCount > 0) {
+                alien.fireBurstTimer--;
+                if (alien.fireBurstTimer <= 0) {
+                    alien.fireBurstTimer = BURST_INTERVAL;
+                    fireBullet(player); audio.sndShoot();
+                    alien.fireBurstCount--;
+                    if (alien.fireBurstCount <= 0) alien.fireVolleyTimer = VOLNEY_COOLDOWN;
+                }
+            } else {
+                alien.fireVolleyTimer--;
+                if (alien.fireVolleyTimer <= 0) { alien.fireBurstCount = BURST_COUNT; alien.fireBurstTimer = 0; }
+            }
+        }
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
+        // Alien-specific: player bullets vs alien collision
+        if (!alien.entering && alien.invincibleFrames <= 0) {
+            for (auto& b : bulletMgr.all()) {
+                if (!b.active || !b.canDamage) continue;
+                double dx = b.x - alien.x, dy = b.y - alien.y;
+                if (dx*dx + dy*dy < 22.0*22.0) {
+                    b.active = false; b.canDamage = false; alien.hp--;
+                    particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
+                    if (alien.hp <= 0) {
+                        alien.defeated = true; alien.active = false;
+                        particleMgr.spawnExplosion(alien.x, alien.y, 20);
+                        particleMgr.spawnExplosion(alien.x-8, alien.y-4, 12);
+                        particleMgr.spawnExplosion(alien.x+8, alien.y+4, 12);
+                        audio.sndExplosionSmall(); score += 3;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    void drawEnemy(SDL_Renderer* r) const {
+        if (!alien.active) return;
+        int ex = (int)alien.x, ey = (int)alien.y, sz = 12;
+        int rCol, gCol, bCol;
+        if (alien.entering || alien.invincibleFrames > 0) { rCol=100; gCol=180; bCol=255; }
+        else {
+            double hpR = (double)alien.hp / ALIEN_HP;
+            rCol=255; gCol=(int)(150*hpR+80*(1-hpR)); bCol=(int)(100*hpR+30*(1-hpR));
+        }
+        if (alien.entering && alien.enterFrame > 3) {
+            for (int k = 1; k <= 3; ++k) {
+                double pRaw = (double)(alien.enterFrame - k*3) / alien.enterDuration;
+                if (pRaw < 0) continue;
+                double pE = 1.0 - std::pow(1.0 - pRaw, 3.0);
+                int px = (int)(alien.startX + (alien.targetX - alien.startX) * pE);
+                int py = (int)(alien.startY + (alien.targetY - alien.startY) * pE);
+                SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)(150 - k*40));
+                SDL_RenderDrawPoint(r, px, py);
+            }
+        }
+        SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
+        int hw = sz * 2 / 3;
+        SDL_Point pts[4] = {
+            {ex, ey - sz}, {ex + hw, ey},
+            {ex, ey + sz}, {ex - hw, ey}
+        };
+        SDL_RenderDrawLines(r, pts, 4);
+        SDL_RenderDrawLine(r, pts[3].x, pts[3].y, pts[0].x, pts[0].y);
+        SDL_RenderDrawLine(r, ex - hw, ey, ex + hw, ey);
+    }
+};
+
+
 // ============== ChapterManager ==============
 class ChapterManager {
     int currentIdx;
@@ -2584,6 +2827,7 @@ public:
     void reset() { currentIdx = 0; }
 };
 
+
 // ============== UIRenderer ==============
 class UIRenderer {
 public:
@@ -2636,6 +2880,7 @@ public:
         }
     }
 };
+
 
 // ============== MenuStateMachine ==============
 class MenuStateMachine {
@@ -2746,6 +2991,7 @@ public:
     bool getOptionFromPause() const { return optionFromPause; }
 };
 
+
 // ============== Game 类 ==============
 enum GamePhase { PHASE_PLAY, PHASE_BOSS_INTRO, PHASE_BOSS_FIGHT, PHASE_BOSS_PHASE2, PHASE_BOSS_DEFEAT };
 
@@ -2754,12 +3000,12 @@ class Game {
     AudioEngine& audio;
     Font font;
 
-    Player player;
-    BulletManager bulletMgr;
-    AlienManager alienMgr;
-    ParticleManager particleMgr;
-    ShockwaveManager shockwaveMgr;
-    Boss boss;
+    Ch1Player player;
+    Ch1BulletManager bulletMgr;
+    Ch1AlienManager alienMgr;
+    Ch1ParticleManager particleMgr;
+    Ch1ShockwaveManager shockwaveMgr;
+    Ch1Boss boss;
     FloatingTextManager floatingTextMgr;
     ChapterManager chapterMgr;
 
@@ -2792,7 +3038,7 @@ class Game {
     // Sound menu cursor
     int soundCursor;
 
-    // Boss defeat sequence
+    // Ch1Boss defeat sequence
     int bossDefeatTimer, defeatAlienTimer, defeatReturnTimer, defeatFWTimer;
     int defeatMCDelay, defeatFadeTimer;
     bool missionCompleteShown, missionComplete;
@@ -2805,8 +3051,9 @@ class Game {
     int wallContactY;      // Y position where plane touched the barrier
     int wallAnimFrame;     // animates lightning/sparks while touching
 
-    // Ch2 danmaku system
-    DanmakuManager dmMgr;
+    // Ch2 enemy systems
+    Ch2AlienManager ch2AlienMgr;
+    Ch2DanmakuManager dmMgr;
     int dmFireCooldown;    // player fire cooldown in side-scroll mode
 
     // Timing
@@ -2816,9 +3063,9 @@ class Game {
     bool upWas, downWas, enterWas, escWas, leftWas, rightWas;
     int lastShockwaveLevel;
 
-    // Background (per chapter, persistent)
-    Background* background;
-    SideScrollingBackground* sideBg;
+    // Ch1Background (per chapter, persistent)
+    Ch1Background* background;
+    Ch2Background* sideBg;
 
 public:
     Game(Renderer& r, AudioEngine& a, SDL_Window* w)
@@ -2839,8 +3086,8 @@ public:
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
           leftWas(false), rightWas(false), lastShockwaveLevel(0), background(nullptr), sideBg(nullptr) {
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
-        background = new Background(chapterMgr.getConfig());
-        sideBg = new SideScrollingBackground();
+        background = new Ch1Background(chapterMgr.getConfig());
+        sideBg = new Ch2Background();
     }
 
     void resetGame() {
@@ -2862,6 +3109,9 @@ public:
         lastShockwaveLevel = 0;
         baseHP = 10;
         player.reset();
+        if (chapterMgr.getConfig().isSideScrolling) {
+            player.setX(100); player.setY(WIN_HEIGHT / 2);
+        }
         bulletMgr.reset();
         alienMgr.reset();
         particleMgr.all().clear();
@@ -2873,12 +3123,12 @@ public:
         paused = false;
         missionComplete = false; missionCompleteShown = false;
         wallFlashTimer = 0; wallContactY = 0; wallAnimFrame = 0;
-        dmMgr.reset(); dmFireCooldown = 0;
+        ch2AlienMgr.reset(); dmMgr.reset(); dmFireCooldown = 0;
         bossDefeatTimer = 0; defeatAlienTimer = 0; defeatReturnTimer = 0;
         defeatFWTimer = 0; defeatMCDelay = 0; defeatFadeTimer = 0;
         countdown = -1; countdownFrame = 0;
         soundCursor = 0;
-        if (background) { delete background; background = new Background(chapterMgr.getConfig()); }
+        if (background) { delete background; background = new Ch1Background(chapterMgr.getConfig()); }
         if (sideBg) sideBg->reset();
     }
 
@@ -3018,7 +3268,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.5", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.7", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -3093,8 +3343,8 @@ private:
                     alienMgr.applyChapterConfig(chapterMgr.getConfig());
                     bulletMgr.updateParams(0);
                     shockwaveMgr.updateParams(0);
-                    // Spawn danmaku enemy
-                    dmMgr.spawnEnemy();
+                    // Spawn Ch2 regular alien (danmaku disabled for testing)
+                    ch2AlienMgr.spawnIfNeeded();
                     dmFireCooldown = 0;
                     tJustEntered = true;
                 }
@@ -3123,7 +3373,7 @@ private:
                 phase = PHASE_BOSS_INTRO;
                 alienMgr.setAllInvincible();
                 for (int i = 0; i < 5; ++i) {
-                    Alien a;
+                    Ch1Alien a;
                     a.targetT = 0.15 + (rand() % 700) / 1000.0;
                     a.t = a.targetT; a.y = 120.0 + (rand() % 180);
                     a.entering = false; a.enterFromTop = false; a.enterFromBoss = false;
@@ -3148,9 +3398,9 @@ private:
                 boss.phase2TriggeredRef() = true;
                 boss.flashTimerRef() = 0;
                 phase = PHASE_BOSS_PHASE2;
-                boss.setHealWavesEnabled(false);
+                boss.setCh1HealWavesEnabled(false);
                 for (int i = 0; i < 5; ++i) {
-                    Alien a;
+                    Ch1Alien a;
                     a.targetT = 0.15 + (rand() % 700) / 1000.0;
                     a.t = a.targetT; a.y = 120.0 + (rand() % 180);
                     a.entering = false; a.enterFromTop = false; a.enterFromBoss = false;
@@ -3175,7 +3425,7 @@ private:
                 boss.phase2TriggeredRef() = true;
                 boss.flashTimerRef() = 0;
                 phase = PHASE_BOSS_FIGHT;
-                boss.setHealWavesEnabled(true);
+                boss.setCh1HealWavesEnabled(true);
                 shockwaveMgr.setPending(true);
             }
         }
@@ -3381,7 +3631,7 @@ private:
 
             player.setX(px); player.setY(py);
 
-            // Player shooting (Chapter 1 original fire rate)
+            // Ch1Player shooting (Chapter 1 original fire rate)
             if (dmFireCooldown > 0) dmFireCooldown--;
             if (shoot && dmFireCooldown <= 0) {
                 bulletMgr.addBulletSideScroll(player, &audio);
@@ -3390,9 +3640,11 @@ private:
             bulletMgr.update(alienMgr.all());
             bulletMgr.removeInactive();
 
-            // Danmaku system update
-            dmMgr.update(bulletMgr, particleMgr, audio, score, player, floatingTextMgr);
-            if (dmMgr.isGameOver()) gameOver = true;
+            // Ch2 alien system update (danmaku disabled for testing)
+            player.updateInvFrames();
+            ch2AlienMgr.spawnIfNeeded();
+            ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, player, floatingTextMgr);
+            if (ch2AlienMgr.isGameOver()) gameOver = true;
 
             floatingTextMgr.update();
             particleMgr.update();
@@ -3401,7 +3653,7 @@ private:
         }
 
         if (phase != PHASE_BOSS_DEFEAT) {
-            // Boss trigger
+            // Ch1Boss trigger
             if (score >= chapterMgr.getConfig().bossTriggerScore && phase == PHASE_PLAY) {
                 boss.trigger();
                 phase = PHASE_BOSS_INTRO;
@@ -3414,7 +3666,7 @@ private:
                 alienMgr.updateMovementParams(difficultyTimer);
             }
 
-            // Player input
+            // Ch1Player input
             player.handleInput(keys);
 
             // Shooting
@@ -3439,7 +3691,7 @@ private:
                 alienMgr.spawnTimerRef()--;
             }
 
-            // Shockwave
+            // Ch1Shockwave
             if (score >= 30 && (phase == PHASE_PLAY || phase == PHASE_BOSS_FIGHT)) {
                 shockwaveMgr.attemptAutoRelease(score, player, floatingTextMgr, &audio, &particleMgr);
             }
@@ -3454,12 +3706,12 @@ private:
             shockwaveMgr.update();
             floatingTextMgr.update();
 
-            // Boss movement
+            // Ch1Boss movement
             if (phase == PHASE_BOSS_FIGHT || phase == PHASE_BOSS_PHASE2) {
                 boss.updateMovement();
             }
-            if (phase == PHASE_BOSS_FIGHT && boss.isActive() && boss.isHealWavesEnabled()) {
-                boss.updateHealWaves(particleMgr, alienMgr, &audio);
+            if (phase == PHASE_BOSS_FIGHT && boss.isActive() && boss.isCh1HealWavesEnabled()) {
+                boss.updateCh1HealWaves(particleMgr, alienMgr, &audio);
             }
 
             // Phase2 trigger
@@ -3472,9 +3724,9 @@ private:
                 boss.absorbTimerRef() = 0;
                 boss.postAbsorbTimerRef() = 0;
                 boss.absorbCooldownRef() = 0;
-                boss.absorbStateRef() = Boss::IDLE;
+                boss.absorbStateRef() = Ch1Boss::IDLE;
                 boss.absorbTargetIdxRef() = -1;
-                boss.setHealWavesEnabled(false);
+                boss.setCh1HealWavesEnabled(false);
                 alienMgr.setAllInvincible();
             }
 
@@ -3505,7 +3757,7 @@ private:
                 if (boss.getShakeTimer() == 0 && boss.absorbTimerRef() >= 0) {
                     if (boss.updateAbsorbStateMachine(alienMgr, bulletMgr, particleMgr, &audio)) {
                         alienMgr.setAllVulnerable();
-                        boss.setHealWavesEnabled(true);
+                        boss.setCh1HealWavesEnabled(true);
                     }
                     boss.updateAbsorbAnimations(alienMgr, particleMgr);
                 }
@@ -3516,7 +3768,7 @@ private:
             }
 
             // ======== COLLISION DETECTION ========
-            // Bullet vs Alien
+            // Ch1Bullet vs Ch1Alien
             for (auto& b : bulletMgr.all()) {
                 if (!b.active || !b.canDamage) continue;
                 for (auto& a : alienMgr.all()) {
@@ -3553,7 +3805,7 @@ private:
             }
             bulletMgr.removeInactive();
 
-            // Shockwave vs Alien
+            // Ch1Shockwave vs Ch1Alien
             for (auto& a : alienMgr.all()) {
                 if (!a.active || a.invincibleFrames != 0) continue;
                 int scoreBefore = score;
@@ -3568,7 +3820,7 @@ private:
             for (auto& b : bulletMgr.all()) {
                 if (!b.active || !b.blueBeam) continue;
                 if (b.beamTargetIndex < 0 || b.beamTargetIndex >= (int)alienMgr.all().size()) continue;
-                Alien& a = alienMgr.all()[b.beamTargetIndex];
+                Ch1Alien& a = alienMgr.all()[b.beamTargetIndex];
                 if (!a.active || a.beingAbsorbed) { b.active = false; continue; }
                 double ax = perspLeft(a.y) + a.t * perspWidth(a.y);
                 double dx = b.x - ax, dy = b.y - a.y;
@@ -3584,11 +3836,11 @@ private:
                     a.absorbDuration = 70;
                     a.absorbStartX = ax;
                     a.absorbStartY = a.y;
-                    boss.absorbStateRef() = Boss::SPIRALING;
+                    boss.absorbStateRef() = Ch1Boss::SPIRALING;
                 }
             }
 
-            // Bullet vs Boss
+            // Ch1Bullet vs Ch1Boss
             if (boss.isActive() && phase != PHASE_BOSS_INTRO && phase != PHASE_BOSS_PHASE2 && phase != PHASE_BOSS_DEFEAT) {
                 for (auto& b : bulletMgr.all()) {
                     if (!b.active || !b.canDamage) continue;
@@ -3605,7 +3857,7 @@ private:
                         }
                     }
                 }
-                // Shockwave vs Boss
+                // Ch1Shockwave vs Ch1Boss
                 shockwaveMgr.collideWithBoss(boss.getX(), boss.getY(), boss.lastHitBySWRef(),
                     boss.bonusHpRef(), boss.hpRef(), boss.flashTimerRef(), particleMgr, &audio);
                 if (boss.getHp() <= 0) {
@@ -3746,9 +3998,14 @@ private:
             if (isSide) {
                 bulletMgr.draw(renderer.get());
                 drawPlaneFlat(); drawWallFlash();
-                dmMgr.drawEnemy(renderer.get());
-                dmMgr.drawBullets(renderer.get());
-                dmMgr.drawHUD(renderer.get(), font, score);
+                ch2AlienMgr.drawEnemy(renderer.get());
+                ch2AlienMgr.drawBullets(renderer.get());
+                // Ch2 HUD: all aligned to rightEdge = WIN_WIDTH - 10
+                HUDBase::drawScore(renderer.get(), font, score, WIN_WIDTH - 10, 10);
+                HUDBase::drawHPHearts(renderer.get(), font, ch2AlienMgr.getPlayerHP(), 3, WIN_WIDTH - 10, 28);
+                float eFill2 = (float)(score % 30) / 30.0f;
+                if (score >= 180) eFill2 = 1.0f;
+                HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, eFill2);
                 if (aimAssistOn) drawAimAssistSide();
             } else drawPlane();
 
@@ -3760,7 +4017,7 @@ private:
 
             if (!isSide && boss.isActive()) {
                 if (phase == PHASE_BOSS_PHASE2) boss.drawCircularShockwave(renderer.get());
-                boss.drawHealWaves(renderer.get());
+                boss.drawCh1HealWaves(renderer.get());
                 boss.drawBody(renderer.get());
                 boss.drawHPBar(renderer.get(), font);
             }
@@ -3786,33 +4043,11 @@ private:
 
     void drawScoreHUD() {
         SDL_Renderer* r = renderer.get();
-        char buf[32];
-        snprintf(buf, sizeof(buf), "SCORE %d", score);
-        font.drawString(r, buf, WIN_WIDTH - 160, 10, 2);
-        for (int i = 0; i < 10; ++i) {
-            int hx = WIN_WIDTH - 20 - i * 14;
-            SDL_SetRenderDrawColor(r, (i < baseHP) ? 255 : 70, 20, 20, 255);
-            font.drawChar(r, '*', hx, 28, 2);
-        }
-        // Energy bar
-        {
-            const int EBAR_X = WIN_WIDTH - 20 - (10 - 1) * 14;
-            const int EBAR_W = 10 * 14;
-            const int EBAR_Y = 46, EBAR_H = 6;
-            SDL_SetRenderDrawColor(r, 30, 30, 30, 255);
-            SDL_Rect ebg = {EBAR_X, EBAR_Y, EBAR_W, EBAR_H};
-            SDL_RenderFillRect(r, &ebg);
-            int lev = score / 30;
-            int fillW;
-            if (lev >= 6) fillW = EBAR_W;
-            else fillW = (score % 30) * EBAR_W / 30;
-            if (fillW > 0) {
-                int green = (lev >= 6) ? 255 : (lev >= 1 ? 180 : 100);
-                SDL_SetRenderDrawColor(r, 30, green, 50, 255);
-                SDL_Rect er = {EBAR_X, EBAR_Y, fillW, EBAR_H};
-                SDL_RenderFillRect(r, &er);
-            }
-        }
+        HUDBase::drawScore(r, font, score, WIN_WIDTH - 10, 10);
+        HUDBase::drawHPHearts(r, font, baseHP, 10, WIN_WIDTH - 10, 28);
+        int lev = score / 30;
+        float eFill = (lev >= 6) ? 1.0f : (float)(score % 30) / 30.0f;
+        HUDBase::drawEnergyBar(r, WIN_WIDTH - 10, 46, 10*14, 6, eFill);
     }
 
     void drawFloatingTexts() {
@@ -3866,9 +4101,8 @@ private:
     }
 
     void drawPlaneFlat() {
-        // Chapter 2 plane: nose right, parallel to corridor floor plane.
-        // Strong perspective: far side (upper) ≈55% size of near side (lower).
-        // Upper wing intact, lower wing has visible notch to distinguish up/down.
+        // Blink during invincibility frames
+        if (player.getInvFrames() > 0 && (player.getInvFrames() / 4) % 2 == 0) return;
         SDL_Renderer* r = renderer.get();
         SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
         int px = player.getX(), py = player.getY();
@@ -3989,24 +4223,24 @@ private:
         // Ray: horizontal from player (dx=1, dy=0). Check targets along this ray.
         // No range limit (Ch2 bullets deal damage at any range).
 
-        // Check danmaku enemy (vulnerable state) — snap radius matches collision (24)
-        DanmakuEnemy& de = dmMgr.getEnemy();
-        if (de.active && !de.entering && de.invincibleFrames <= 0 && de.vulnTimer > 0) {
-            double t = de.x - px;
+        // Check Ch2 regular alien (vulnerable state)
+        Ch2Alien& ca = ch2AlienMgr.getAlien();
+        if (ca.active && !ca.entering && ca.invincibleFrames <= 0) {
+            double t = ca.x - px;
             if (t > 0) {
-                double lateral = std::fabs(de.y - py);
-                if (lateral < 24.0 && t < bestT) { bestT = t; snapX = de.x; snapY = de.y; }
+                double lateral = std::fabs(ca.y - py);
+                if (lateral < 18.0 && t < bestT) { bestT = t; snapX = ca.x; snapY = ca.y; }
             }
         }
 
-        // Check danmaku bullets — snap radius matches player collision (16)
-        auto& dbullets = dmMgr.getBullets();
-        for (const auto& db : dbullets) {
-            if (!db.active) continue;
-            double t = db.x - px;
+        // Check Ch2 crystal bullets
+        auto& cbullets = ch2AlienMgr.getBullets();
+        for (const auto& cb : cbullets) {
+            if (!cb.active) continue;
+            double t = cb.x - px;
             if (t > 0) {
-                double lateral = std::fabs(db.y - py);
-                if (lateral < 16.0 && t < bestT) { bestT = t; snapX = db.x; snapY = db.y; }
+                double lateral = std::fabs(cb.y - py);
+                if (lateral < 16.0 && t < bestT) { bestT = t; snapX = cb.x; snapY = cb.y; }
             }
         }
 
@@ -4050,7 +4284,7 @@ private:
         SDL_Renderer* r = renderer.get();
         double tPlane = (player.getX() - perspLeft(player.getY())) / perspWidth(player.getY());
         if (tPlane < 0.0) tPlane = 0.0; if (tPlane > 1.0) tPlane = 1.0;
-        double range = BulletManager::getBulletRange();
+        double range = Ch1BulletManager::getBulletRange();
         double ty = player.getY() - range;
         double tx = perspLeft(ty) + tPlane * perspWidth(ty);
         double dx = tx - player.getX(), dy = ty - player.getY();
@@ -4222,7 +4456,7 @@ private:
         UIRenderer::drawHalfTransparentOverlay(r, 200);
         font.drawString(r, "GAME OVER", CENTER_X - 118, 140, 4);
         char buf[32];
-        snprintf(buf, sizeof(buf), "SCORE %d", score);
+        snprintf(buf, sizeof(buf), "SCORE:%-4d", score);
         int scoreW = (int)strlen(buf) * 6 * 4;
         font.drawString(r, buf, CENTER_X - scoreW/2, 210, 4);
         const char* items[2] = {"PLAY AGAIN", "EXIT"};
@@ -4274,6 +4508,7 @@ private:
         }
     }
 };
+
 
 // ============== MAIN ==============
 int main(int argc, char* argv[]) {

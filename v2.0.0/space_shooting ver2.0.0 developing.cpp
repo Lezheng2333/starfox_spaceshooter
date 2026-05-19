@@ -32,7 +32,8 @@ class Renderer;
 class AudioEngine;
 class FloatingTextManager;
 class Ch1ParticleManager;
-class Ch1Player;
+class TrainingPlane;
+class NightElf;
 class Ch1BulletManager;
 class Ch1ShockwaveManager;
 class Ch1AlienManager;
@@ -846,8 +847,8 @@ public:
     }
 };
 
-// ============== PlayerBase (shared player state) ==============
-class PlayerBase {
+// ============== Player (shared player state) ==============
+class Player {
 protected:
     int x, y;
     double rollAngle, rollTarget;
@@ -859,7 +860,7 @@ protected:
 public:
     AimAssist aimAssist;  // every player has aim assist
 
-    PlayerBase() : x(CENTER_X), y(WIN_HEIGHT - 80), rollAngle(0), rollTarget(0), lastMoveDir(0), invFrames(0) {}
+    Player() : x(CENTER_X), y(WIN_HEIGHT - 80), rollAngle(0), rollTarget(0), lastMoveDir(0), invFrames(0) {}
 
     int getX() const { return x; }
     int getY() const { return y; }
@@ -871,12 +872,51 @@ public:
     void setRollAngle(double ra) { rollAngle = ra; }
     void setInvFrames(int f) { invFrames = f; }
     void updateInvFrames() { if (invFrames > 0) invFrames--; }
+    virtual void draw(SDL_Renderer* r) const {}
+    virtual void handleInput(const Uint8* keys) {}
+    virtual int getGunCount() const { return 1; }
+    virtual void getGunOffset(int idx, int& ox, int& oy) const { ox = 14; oy = 0; }
 };
 
-// ============== Ch1Player (Chapter 1 perspective movement) ==============
-class Ch1Player : public PlayerBase {
+// ============== TrainingPlane (Chapter 1 perspective movement) ==============
+class TrainingPlane : public Player {
 public:
-    Ch1Player() : PlayerBase() {}
+    TrainingPlane() : Player() {}
+
+    void draw(SDL_Renderer* r) const {
+        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+        int px = getX(), py = getY();
+        double tPlane = (px - perspLeft(py)) / perspWidth(py);
+        if (tPlane < 0.0) tPlane = 0.0; if (tPlane > 1.0) tPlane = 1.0;
+        double hx = perspLeft(HORIZON_Y) + tPlane * perspWidth(HORIZON_Y);
+        double hdx = hx - px, hdy = HORIZON_Y - py;
+        if (hdy > 0) { hdx = 0; hdy = -1; }
+        double hlen = std::sqrt(hdx*hdx + hdy*hdy);
+        if (hlen < 0.01) { hdx = 0; hdy = -1; hlen = 1; }
+        double hnx = hdx / hlen, hny = hdy / hlen;
+        double c = std::cos(getRollAngle()), s = std::sin(getRollAngle());
+
+        auto hr = [&](int lx, int ly) -> SDL_Point {
+            return {px + (int)(lx * (-hny) - ly * hnx),
+                    py + (int)(lx * hnx  + ly * (-hny))};
+        };
+        auto hrr = [&](int lx, int ly) -> SDL_Point {
+            double rx = lx * c, ry = ly + lx * s * 0.40;
+            return {px + (int)(rx * (-hny) - ry * hnx),
+                    py + (int)(rx * hnx  + ry * (-hny))};
+        };
+
+        SDL_Point nose = hr(0, -12), leftB = hr(-10, 6), rightB = hr(10, 6);
+        SDL_Point body[3] = {nose, leftB, rightB};
+        SDL_RenderDrawLines(r, body, 3);
+        SDL_RenderDrawLine(r, leftB.x, leftB.y, rightB.x, rightB.y);
+        SDL_Point lw1 = hrr(-6, 0), lw2 = hrr(-14, 4);
+        SDL_RenderDrawLine(r, lw1.x, lw1.y, lw2.x, lw2.y);
+        SDL_Point rw1 = hrr(6, 0),  rw2 = hrr(14, 4);
+        SDL_RenderDrawLine(r, rw1.x, rw1.y, rw2.x, rw2.y);
+        SDL_Point tail1 = hr(0, 6), tail2 = hr(0, 12);
+        SDL_RenderDrawLine(r, tail1.x, tail1.y, tail2.x, tail2.y);
+    }
 
     void reset() {
         x = CENTER_X; y = WIN_HEIGHT - 80;
@@ -924,6 +964,103 @@ public:
     }
 };
 
+// ============== NightElf (plane 2, Ch2 default) ==============
+class NightElf : public Player {
+public:
+    NightElf() : Player() {}
+
+    void reset() {
+        x = 100; y = WIN_HEIGHT / 2;
+        rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
+        invFrames = 0;
+    }
+
+    void draw(SDL_Renderer* r) const override {
+        if (getInvFrames() > 0 && (getInvFrames() / 4) % 2 == 0) return;
+        int px = getX(), py = getY();
+        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+
+        int wingX = px + 2, wingSpan = 8;
+        int noseX = wingX + 30;          // 30° nose: tan(15°)=8/30≈0.27
+        int tailX = wingX + 5;           // 120° tail, reflected across wing line
+
+        // Body outline: nose → upper wing → tail → lower wing → nose
+        SDL_Point body[5] = {
+            {noseX, py},
+            {wingX, py - wingSpan},
+            {tailX, py},
+            {wingX, py + wingSpan},
+            {noseX, py}
+        };
+        SDL_RenderDrawLines(r, body, 5);
+
+        // Parallel lines from wing tips forward, slightly shorter than nose
+        SDL_RenderDrawLine(r, wingX, py - wingSpan, noseX - 3, py - wingSpan);
+        SDL_RenderDrawLine(r, wingX, py + wingSpan, noseX - 3, py + wingSpan);
+
+        // Fill upper half with correct lower boundary
+        for (int sx = wingX; sx <= noseX; sx += 2) {
+            double tn = (double)(sx - wingX) / (noseX - wingX);
+            int uy = (py - wingSpan) + (int)(wingSpan * tn);
+            int ly;
+            if (sx <= tailX) {
+                double tt = (double)(sx - wingX) / (tailX - wingX);
+                ly = (py - wingSpan) + (int)(wingSpan * tt);
+            } else {
+                ly = py;
+            }
+            SDL_RenderDrawLine(r, sx, uy, sx, ly);
+        }
+    }
+
+    int getGunCount() const override { return 3; }
+    void getGunOffset(int idx, int& ox, int& oy) const override {
+        if (idx == 0)      { ox = 32; oy = 0; }    // nose tip
+        else if (idx == 1) { ox = 29; oy = -8; }   // upper wing tip
+        else               { ox = 29; oy = 8; }    // lower wing tip
+    }
+};
+
+// ============== Druid (plane 3, saved design) ==============
+class Druid : public Player {
+public:
+    Druid() : Player() {}
+
+    void reset() {
+        x = 100; y = WIN_HEIGHT / 2;
+        rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
+        invFrames = 0;
+    }
+
+    void draw(SDL_Renderer* r) const {
+        if (getInvFrames() > 0 && (getInvFrames() / 4) % 2 == 0) return;
+        int px = getX(), py = getY();
+        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+
+        int noseLen = 14, tailLen = 10, wingSpan = 8;
+        int noseX = px + noseLen, tailX = px - tailLen;
+
+        // Swallowtail body: nose(60°) → wings → tail tips → 90° notch → back
+        SDL_Point body[7] = {
+            {noseX, py},                       // 0: nose tip
+            {px, py - wingSpan},               // 1: upper wing
+            {tailX, py - wingSpan/2},          // 2: upper tail tip
+            {tailX + 4, py},                   // 3: notch center (90° V)
+            {tailX, py + wingSpan/2},          // 4: lower tail tip
+            {px, py + wingSpan},               // 5: lower wing
+            {noseX, py}                        // 6: back to nose
+        };
+        SDL_RenderDrawLines(r, body, 7);
+
+        // Parallel lines from wing tips toward nose (shorter than nose)
+        SDL_RenderDrawLine(r, px, py - wingSpan, px + 11, py - wingSpan);
+        SDL_RenderDrawLine(r, px, py + wingSpan, px + 11, py + wingSpan);
+
+        // Center guide line (navigation arrow feel)
+        SDL_RenderDrawLine(r, px, py, noseX, py);
+    }
+};
+
 
 // ============== Ch1BulletManager ==============
 class Ch1BulletManager {
@@ -948,25 +1085,25 @@ public:
         bulletSpeed = BASE_BULLET_SPEED * std::pow(1.1, lv - 1);
     }
 
-    void addBullet(Ch1Player& player, AudioEngine* audio) {
-        double tPlane = player.getT();
+    void addBullet(TrainingPlane& pl, AudioEngine* audio) {
+        double tPlane = pl.getT();
         double spread = (rand() % 40 - 20) / 1000.0;
         double tBullet = tPlane + spread;
         if (tBullet < 0.0) tBullet = 0.0;
         if (tBullet > 1.0) tBullet = 1.0;
 
-        double ty = player.getY() - BULLET_RANGE;
+        double ty = pl.getY() - BULLET_RANGE;
         double tx = perspLeft(ty) + tBullet * perspWidth(ty);
 
-        double dirX = tx - player.getX();
-        double dirY = ty - player.getY();
+        double dirX = tx - pl.getX();
+        double dirY = ty - pl.getY();
         double len = std::sqrt(dirX * dirX + dirY * dirY);
         if (len < 0.001) return;
 
         Ch1Bullet b;
-        b.x = (double)player.getX();
-        b.y = (double)player.getY();
-        b.startX = player.getX(); b.startY = player.getY();
+        b.x = (double)pl.getX();
+        b.y = (double)pl.getY();
+        b.startX = pl.getX(); b.startY = pl.getY();
         b.dx = dirX / len; b.dy = dirY / len;
         b.active = true; b.canDamage = true;
         b.blueBeam = false; b.beamTargetIndex = -1;
@@ -987,12 +1124,15 @@ public:
         bullets.push_back(beam);
     }
 
-    void addBulletSideScroll(Ch1Player& player, AudioEngine* audio) {
+    void addBulletSideScroll(Player& pl, AudioEngine* audio) {
+        addBulletSideScrollAt(pl, 14, 0, audio);
+    }
+    void addBulletSideScrollAt(Player& pl, int ox, int oy, AudioEngine* audio) {
         Ch1Bullet b;
-        b.x = (double)player.getX() + 14;
-        b.y = (double)player.getY();
+        b.x = (double)pl.getX() + ox;
+        b.y = (double)pl.getY() + oy;
         b.startX = b.x; b.startY = b.y;
-        double scatter = (rand() % 16 - 8) / 50.0;  // minimal vertical scatter
+        double scatter = (rand() % 16 - 8) / 50.0;
         b.dx = 11.0; b.dy = scatter;
         b.active = true; b.canDamage = true;
         b.sideScroll = true;
@@ -1129,7 +1269,7 @@ public:
         interval = sec * 60;
     }
 
-    void attemptAutoRelease(int score, Ch1Player& player, FloatingTextManager& ft, AudioEngine* audio, Ch1ParticleManager* pm) {
+    void attemptAutoRelease(int score, Player& pl, FloatingTextManager& ft, AudioEngine* audio, Ch1ParticleManager* pm) {
         if (score < 30) return;
         int curLv = score / 30;
         if (curLv > lastLevel) {
@@ -1137,7 +1277,7 @@ public:
             pending = true;
             timer = 0;
             if (curLv < 6)
-                ft.spawn((float)player.getX(), (float)(player.getY() - 30), "LEVEL UP!");
+                ft.spawn((float)pl.getX(), (float)(pl.getY() - 30), "LEVEL UP!");
         }
         if (pending) {
             pending = false;
@@ -2303,7 +2443,7 @@ protected:
     bool gameOver;
 
     void updateBullets(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
-                       Ch1Player& player, FloatingTextManager& ftMgr) {
+                       Player& pl, FloatingTextManager& ftMgr) {
         for (auto& b : bullets) {
             if (!b.active) continue;
             b.x += b.dx; b.y += b.dy;
@@ -2324,16 +2464,16 @@ protected:
             }
         }
         // Player vs enemy bullets (skip if player invincible)
-        if (player.getInvFrames() <= 0) {
+        if (pl.getInvFrames() <= 0) {
             for (auto& eb : bullets) {
                 if (!eb.active) continue;
-                double dx = player.getX() - eb.x, dy = player.getY() - eb.y;
+                double dx = pl.getX() - eb.x, dy = pl.getY() - eb.y;
                 if (dx*dx + dy*dy < 16.0*16.0) {
                     eb.active = false; playerHP--;
-                    player.setInvFrames(60);  // 1 second invincibility
+                    pl.setInvFrames(60);  // 1 second invincibility
                     particleMgr.spawnExplosion(eb.x, eb.y, 8); audio.sndPlayerHit();
-                    ftMgr.spawn((float)player.getX()+1, (float)(player.getY()-19), "HP -1", 0,0,0);
-                    ftMgr.spawn((float)player.getX(), (float)(player.getY()-20), "HP -1", 255,50,50);
+                    ftMgr.spawn((float)pl.getX()+1, (float)(pl.getY()-19), "HP -1", 0,0,0);
+                    ftMgr.spawn((float)pl.getX(), (float)(pl.getY()-20), "HP -1", 255,50,50);
                     if (playerHP <= 0) { gameOver = true; playerHP = 0; }
                 }
             }
@@ -2436,7 +2576,7 @@ public:
     }
 
     void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
-                int& score, Ch1Player& player, FloatingTextManager& ftMgr) {
+                int& score, Player& pl, FloatingTextManager& ftMgr) {
         for (auto& e : enemies) {
             if (e.defeated) {
                 if (e.defeatTimer > 0) {
@@ -2527,7 +2667,7 @@ public:
         // Remove fully dead enemies (defeated and timer done)
         enemies.erase(std::remove_if(enemies.begin(), enemies.end(),
             [](const Ch2DanmakuEnemy& e){ return e.defeated && e.defeatTimer <= 0; }), enemies.end());
-        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, pl, ftMgr);
     }
 
     void drawEnemy(SDL_Renderer* r) const {
@@ -2600,8 +2740,8 @@ class Ch2AlienManager : public Ch2ShooterBase {
 
     std::vector<Ch2Alien> aliens;
 
-    void fireBullet(Ch1Player& player, Ch2Alien& a) {
-        double dx = player.getX() - a.x, dy = player.getY() - a.y;
+    void fireBullet(Player& pl, Ch2Alien& a) {
+        double dx = pl.getX() - a.x, dy = pl.getY() - a.y;
         double d = std::sqrt(dx*dx + dy*dy); if (d < 1) d = 1;
         Ch2EnemyBullet b;
         b.x = a.x; b.y = a.y;
@@ -2634,7 +2774,7 @@ public:
     const std::vector<Ch2Alien>& getAliens() const { return aliens; }
 
     void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
-                int& score, Ch1Player& player, FloatingTextManager& ftMgr) {
+                int& score, Player& pl, FloatingTextManager& ftMgr) {
         for (auto& a : aliens) {
             if (!a.active && !a.defeated) continue;
             if (a.defeated) continue;
@@ -2657,7 +2797,7 @@ public:
                     a.fireBurstTimer--;
                     if (a.fireBurstTimer <= 0) {
                         a.fireBurstTimer = BURST_INTERVAL;
-                        fireBullet(player, a); audio.sndShoot();
+                        fireBullet(pl, a); audio.sndShoot();
                         a.fireBurstCount--;
                         if (a.fireBurstCount <= 0) a.fireVolleyTimer = VOLNEY_COOLDOWN;
                     }
@@ -2689,7 +2829,7 @@ public:
         // Remove defeated/inactive aliens
         aliens.erase(std::remove_if(aliens.begin(), aliens.end(),
             [](const Ch2Alien& a){ return !a.active && !a.defeated; }), aliens.end());
-        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, player, ftMgr);
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, pl, ftMgr);
     }
 
     void drawEnemy(SDL_Renderer* r) const {
@@ -2968,7 +3108,9 @@ class Game {
     AudioEngine& audio;
     Font font;
 
-    Ch1Player player;
+    TrainingPlane trainingPlane;
+    NightElf nightElf;
+    Player* player;
     Ch1BulletManager bulletMgr;
     Ch1AlienManager alienMgr;
     Ch1ParticleManager particleMgr;
@@ -3039,6 +3181,7 @@ class Game {
 public:
     Game(Renderer& r, AudioEngine& a, SDL_Window* w)
         : renderer(r), audio(a), window(w), shakeTex(nullptr),
+          player(&trainingPlane),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
           paused(false), gameOver(false), aimAssistOn(false),
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
@@ -3077,9 +3220,10 @@ public:
         difficultyTimer = 0;
         lastShockwaveLevel = 0;
         baseHP = 10;
-        player.reset();
         if (chapterMgr.getConfig().isSideScrolling) {
-            player.setX(100); player.setY(WIN_HEIGHT / 2);
+            nightElf.reset(); player = &nightElf;
+        } else {
+            trainingPlane.reset(); player = &trainingPlane;
         }
         bulletMgr.reset();
         alienMgr.reset();
@@ -3237,7 +3381,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.8", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.9", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -3312,7 +3456,6 @@ private:
                     alienMgr.applyChapterConfig(chapterMgr.getConfig());
                     bulletMgr.updateParams(0);
                     shockwaveMgr.updateParams(0);
-                    // Spawn Ch2 regular alien (danmaku disabled for testing)
                     dmFireCooldown = 0;
                     tJustEntered = true;
                 }
@@ -3583,7 +3726,7 @@ private:
             bool moveUp    = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
             bool moveDown  = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
             bool shoot     = keys[SDL_SCANCODE_SPACE];
-            int px = player.getX(), py = player.getY();
+            int px = player->getX(), py = player->getY();
             if (moveLeft)  px -= 6;
             if (moveRight) px += 6;
             if (moveUp)    py -= 6;
@@ -3597,12 +3740,17 @@ private:
                 wallFlashTimer = 28; wallContactY = py; wallAnimFrame++;
             } else if (wallFlashTimer > 0) { wallFlashTimer--; wallAnimFrame++; }
 
-            player.setX(px); player.setY(py);
+            player->setX(px); player->setY(py);
 
-            // Ch1Player shooting (Chapter 1 original fire rate)
+            // TrainingPlane shooting (Chapter 1 original fire rate)
             if (dmFireCooldown > 0) dmFireCooldown--;
             if (shoot && dmFireCooldown <= 0) {
-                bulletMgr.addBulletSideScroll(player, &audio);
+                int nGuns = player->getGunCount();
+                for (int g = 0; g < nGuns; ++g) {
+                    int ox, oy;
+                    player->getGunOffset(g, ox, oy);
+                    bulletMgr.addBulletSideScrollAt(*player, ox, oy, &audio);
+                }
                 dmFireCooldown = 7;
             }
             bulletMgr.update(alienMgr.all());
@@ -3616,10 +3764,10 @@ private:
                 if (key2Now && !key2Was) { dmMgr.spawnEnemy(); }
                 key1Was = key1Now; key2Was = key2Now;
             }
-            player.updateInvFrames();
-            ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, player, floatingTextMgr);
+            player->updateInvFrames();
+            ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr);
             if (ch2AlienMgr.isGameOver()) gameOver = true;
-            dmMgr.update(bulletMgr, particleMgr, audio, score, player, floatingTextMgr);
+            dmMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr);
             if (dmMgr.isGameOver()) gameOver = true;
 
             floatingTextMgr.update();
@@ -3642,12 +3790,12 @@ private:
                 alienMgr.updateMovementParams(difficultyTimer);
             }
 
-            // Ch1Player input
-            player.handleInput(keys);
+            // TrainingPlane input
+            player->handleInput(keys);
 
             // Shooting
             if (keys[SDL_SCANCODE_SPACE] && bulletMgr.canFire()) {
-                bulletMgr.addBullet(player, &audio);
+                bulletMgr.addBullet((TrainingPlane&)*player, &audio);
                 bulletMgr.setCooldown();
             }
             bulletMgr.decrementCooldown();
@@ -3669,7 +3817,7 @@ private:
 
             // Ch1Shockwave
             if (score >= 30 && (phase == PHASE_PLAY || phase == PHASE_BOSS_FIGHT)) {
-                shockwaveMgr.attemptAutoRelease(score, player, floatingTextMgr, &audio, &particleMgr);
+                shockwaveMgr.attemptAutoRelease(score, *player, floatingTextMgr, &audio, &particleMgr);
             }
 
             // Updates
@@ -3893,7 +4041,7 @@ private:
             defeatMCDelay++;
             if (defeatMCDelay >= 60) {
                 missionCompleteShown = true;
-                floatingTextMgr.spawn((float)player.getX(), (float)(player.getY() - 30),
+                floatingTextMgr.spawn((float)player->getX(), (float)(player->getY() - 30),
                                       "MISSION COMPLETE!", 255, 255, 50);
             }
         }
@@ -3903,17 +4051,17 @@ private:
             if (defeatReturnTimer >= 120 && defeatReturnTimer < 200) {
                 double t = (defeatReturnTimer - 120) / 80.0;
                 double eased = t * t * (3.0 - 2.0 * t);
-                int px = player.getX() + (int)((CENTER_X - player.getX()) * eased * 0.25);
-                player.setX(px);
-                if (std::abs(player.getX() - CENTER_X) < 2) player.setX(CENTER_X);
+                int px = player->getX() + (int)((CENTER_X - player->getX()) * eased * 0.25);
+                player->setX(px);
+                if (std::abs(player->getX() - CENTER_X) < 2) player->setX(CENTER_X);
             }
             if (defeatReturnTimer == 200) {
-                player.setRollTarget(0); player.setRollAngle(0);
+                player->setRollTarget(0); player->setRollAngle(0);
             }
             if (defeatReturnTimer >= 200) {
-                player.setY(player.getY() - 7);
+                player->setY(player->getY() - 7);
             }
-            if (player.getY() < -50) {
+            if (player->getY() < -50) {
                 defeatFWTimer++;
                 if (defeatFWTimer % 8 == 0) {
                     particleMgr.spawnFireworks(CENTER_X, WIN_HEIGHT);
@@ -3973,7 +4121,7 @@ private:
             }
             if (isSide) {
                 bulletMgr.draw(renderer.get());
-                drawPlaneFlat(); drawWallFlash();
+                player->draw(renderer.get()); drawWallFlash();
                 ch2AlienMgr.drawEnemy(renderer.get());
                 ch2AlienMgr.drawBullets(renderer.get());
                 dmMgr.drawEnemy(renderer.get());
@@ -3984,7 +4132,7 @@ private:
                 HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, 0.0f);  // frozen for now
                 if (!isNormalPlay) font.drawString(renderer.get(), "press 1/2", 10, 10, 2);
                 if (aimAssistOn) drawAimAssistSide();
-            } else drawPlane();
+            } else player->draw(renderer.get());
 
             // Floating texts
             drawFloatingTexts();
@@ -4041,69 +4189,6 @@ private:
         }
     }
 
-    void drawPlane() {
-        SDL_Renderer* r = renderer.get();
-        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-        int px = player.getX(), py = player.getY();
-        double tPlane = (px - perspLeft(py)) / perspWidth(py);
-        if (tPlane < 0.0) tPlane = 0.0; if (tPlane > 1.0) tPlane = 1.0;
-        double hx = perspLeft(HORIZON_Y) + tPlane * perspWidth(HORIZON_Y);
-        double hdx = hx - px, hdy = HORIZON_Y - py;
-        if (hdy > 0) { hdx = 0; hdy = -1; }
-        double hlen = std::sqrt(hdx*hdx + hdy*hdy);
-        if (hlen < 0.01) { hdx = 0; hdy = -1; hlen = 1; }
-        double hnx = hdx / hlen, hny = hdy / hlen;
-        double c = std::cos(player.getRollAngle()), s = std::sin(player.getRollAngle());
-
-        auto hr = [&](int lx, int ly) -> SDL_Point {
-            return {px + (int)(lx * (-hny) - ly * hnx),
-                    py + (int)(lx * hnx  + ly * (-hny))};
-        };
-        auto hrr = [&](int lx, int ly) -> SDL_Point {
-            double rx = lx * c, ry = ly + lx * s * 0.40;
-            return {px + (int)(rx * (-hny) - ry * hnx),
-                    py + (int)(rx * hnx  + ry * (-hny))};
-        };
-
-        SDL_Point nose = hr(0, -12), leftB = hr(-10, 6), rightB = hr(10, 6);
-        SDL_Point body[3] = {nose, leftB, rightB};
-        SDL_RenderDrawLines(r, body, 3);
-        SDL_RenderDrawLine(r, leftB.x, leftB.y, rightB.x, rightB.y);
-        SDL_Point lw1 = hrr(-6, 0), lw2 = hrr(-14, 4);
-        SDL_RenderDrawLine(r, lw1.x, lw1.y, lw2.x, lw2.y);
-        SDL_Point rw1 = hrr(6, 0),  rw2 = hrr(14, 4);
-        SDL_RenderDrawLine(r, rw1.x, rw1.y, rw2.x, rw2.y);
-        SDL_Point tail1 = hr(0, 6), tail2 = hr(0, 12);
-        SDL_RenderDrawLine(r, tail1.x, tail1.y, tail2.x, tail2.y);
-    }
-
-    void drawPlaneFlat() {
-        // Blink during invincibility frames
-        if (player.getInvFrames() > 0 && (player.getInvFrames() / 4) % 2 == 0) return;
-        SDL_Renderer* r = renderer.get();
-        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
-        int px = player.getX(), py = player.getY();
-        float fp = 0.55f;  // dramatic foreshortening for far side
-        int bTop = (int)(10 * fp + 0.5f);  // ≈6 (near body = 10)
-        int wTop = (int)(8 * fp + 0.5f);   // ≈4 (near wing y-span = 8)
-        // Body: nose → lower(near,full) → upper(far,narrowed) → nose
-        SDL_Point body[4] = {
-            {px + 12, py},               // nose
-            {px - 6, py + 10},           // lower body (near camera, full height)
-            {px - 6, py - bTop},         // upper body (far, narrowed by perspective)
-            {px + 12, py}                // back to nose
-        };
-        SDL_RenderDrawLines(r, body, 4);
-        // Rear: slanted (far side visibly shorter)
-        SDL_RenderDrawLine(r, px - 6, py - bTop, px - 6, py + 10);
-        // Upper wing (intact, far): single line, foreshortened
-        SDL_RenderDrawLine(r, px, py - 6, (int)(px - 4*fp), py - 6 - wTop);
-        // Lower wing (notched, near): root→short mid  +  detached tip
-        SDL_RenderDrawLine(r, px, py + 6, px - 2, py + 7);     // inner: short
-        SDL_RenderDrawLine(r, px - 3, py + 11, px - 4, py + 14); // tip: detached
-        // Tail
-        SDL_RenderDrawLine(r, px - 6, py, px - 12, py);
-    }
 
     void drawWallFlash() {
         if (wallFlashTimer <= 0) return;
@@ -4189,7 +4274,7 @@ private:
 
     void drawAimAssistSide() {
         SDL_Renderer* r = renderer.get();
-        int px = player.getX(), py = player.getY();
+        int px = player->getX(), py = player->getY();
         // Default: 200px ahead along the horizontal shooting ray
         double defaultDist = 200.0;
         double aimX = px + defaultDist, aimY = py;
@@ -4220,26 +4305,26 @@ private:
             }
         }
 
-        player.aimAssist.update(bestT < 999.0);
+        player->aimAssist.update(bestT < 999.0);
         double drawX = (bestT < 999.0) ? snapX : aimX;
         double drawY = (bestT < 999.0) ? snapY : aimY;
-        player.aimAssist.draw(r, drawX, drawY, 3, 2);
+        player->aimAssist.draw(r, drawX, drawY, 3, 2);
     }
 
     void drawAimAssist() {
         SDL_Renderer* r = renderer.get();
-        double tPlane = (player.getX() - perspLeft(player.getY())) / perspWidth(player.getY());
+        double tPlane = (player->getX() - perspLeft(player->getY())) / perspWidth(player->getY());
         if (tPlane < 0.0) tPlane = 0.0; if (tPlane > 1.0) tPlane = 1.0;
         double range = Ch1BulletManager::getBulletRange();
-        double ty = player.getY() - range;
+        double ty = player->getY() - range;
         double tx = perspLeft(ty) + tPlane * perspWidth(ty);
-        double dx = tx - player.getX(), dy = ty - player.getY();
+        double dx = tx - player->getX(), dy = ty - player->getY();
         double fullDist = std::sqrt(dx*dx + dy*dy);
         if (fullDist < 1.0) return;
         double defaultDist = fullDist * 0.40;
 
-        double ex = player.getX() + dx / fullDist * defaultDist;
-        double ey = player.getY() + dy / fullDist * defaultDist;
+        double ex = player->getX() + dx / fullDist * defaultDist;
+        double ey = player->getY() + dy / fullDist * defaultDist;
 
         // Snap to nearest enemy
         double bestT = 999.0;
@@ -4248,9 +4333,9 @@ private:
             for (const auto& a : alienMgr.all()) {
                 if (!a.active || a.entering || a.invincibleFrames != 0) continue;
                 double ax = perspLeft(a.y) + a.t * perspWidth(a.y);
-                double t = (a.y - player.getY()) / dy;
+                double t = (a.y - player->getY()) / dy;
                 if (t < 0.0 || t > 0.80) continue;
-                double hitX = player.getX() + dx * t;
+                double hitX = player->getX() + dx * t;
                 double dist = std::fabs(hitX - ax);
                 double depthBelow = (a.y - HORIZON_Y) / (WIN_HEIGHT - HORIZON_Y);
                 double alienScale = (depthBelow < 0) ? 0.08 : 0.08 + 0.92 * depthBelow;
@@ -4259,9 +4344,9 @@ private:
                 if (dist < snapR && t < bestT) { bestT = t; snapX = ax; snapY = a.y; }
             }
             if (boss.isActive() && phase != PHASE_BOSS_INTRO && phase != PHASE_BOSS_PHASE2) {
-                double bt = (boss.getY() - player.getY()) / dy;
+                double bt = (boss.getY() - player->getY()) / dy;
                 if (bt > 0.0 && bt < 0.80) {
-                    double hitX = player.getX() + dx * bt;
+                    double hitX = player->getX() + dx * bt;
                     if (std::fabs(hitX - boss.getX()) < 55.0 && bt < bestT) {  // same as bullet hit radius
                         bestT = bt; snapX = boss.getX(); snapY = boss.getY();
                     }
@@ -4269,10 +4354,10 @@ private:
             }
         }
 
-        player.aimAssist.update(bestT < 999.0);
+        player->aimAssist.update(bestT < 999.0);
         double drawX = (bestT < 999.0) ? snapX : ex;
         double drawY = (bestT < 999.0) ? snapY : ey;
-        player.aimAssist.draw(r, drawX, drawY, 5, 3);
+        player->aimAssist.draw(r, drawX, drawY, 5, 3);
     }
 
     // ======== PAUSED ========

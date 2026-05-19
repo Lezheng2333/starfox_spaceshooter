@@ -18,7 +18,9 @@ Control your starfighter in perspective space, shoot down alien ships, survive w
 
 > macOS 11.0+
 
-[Download v1.2.8](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.8) (latest)
+[Download v1.2.9](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.9) (latest)
+
+[Download v1.2.8](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.8)
 
 [Download v1.2.7](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.7)
 
@@ -34,11 +36,11 @@ Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.8)
+## What's New / 最近更新 (v1.2.9)
 
-- **第二章测试模式** — 按 1 刷普通敌机，按 2 刷弹幕 BOSS，可以同时存在多个敌人，方便调试。
-- **瞄准辅助归位** — 瞄准辅助现在是玩家飞机的自带能力，不再是散落在代码各处的零散逻辑。
-- **代码继续打磨** — 普敌和弹幕敌人都支持多个同屏，底层用 vector 管理，架构更干净。
+- **暗夜精灵战机** — Chapter 2 专属新飞机 NightElf，30° 锐角机头 + 120° 内凹燕尾，三炮火力全开。
+- **飞机继承体系** — Player 基类提取虚方法，TrainingPlane（训练机）/ NightElf（暗夜精灵）/ Druid（备用）三机就位，后续章节直接接入。
+- **多枪射击系统** — getGunCount/getGunOffset 虚方法，NightElf 侧滚模式三倍输出，手感明显提升。
 
 ## Build from Source / 从源码编译
 
@@ -59,7 +61,7 @@ Requires SDL2: `brew install sdl2`
 │   ├── space_shooting ver1.0.0.cpp
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
-└── v2.0.0/                                     # 当前开发主线 (v1.2.8)
+└── v2.0.0/                                     # 当前开发主线 (v1.2.9)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
     └── Release Version/                          # 发布版本
@@ -68,7 +70,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.4.app/ + .zip                   # v1.2.4
         ├── Shooter ver1.2.5.app/ + .zip                   # v1.2.5
         ├── Shooter ver1.2.7.app/ + .zip                   # v1.2.7
-        └── Shooter ver1.2.8.app/ + .zip                   # v1.2.8 (最新)
+        ├── Shooter ver1.2.8.app/ + .zip                   # v1.2.8
+        └── Shooter ver1.2.9.app/ + .zip                   # v1.2.9 (最新)
 ```
 
 ## License

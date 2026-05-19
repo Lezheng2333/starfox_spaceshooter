@@ -519,4 +519,23 @@ Ver 1.0.1 | 2026-05-08
       右侧空间（targetX: 640-780）；右侧入口修正为 x=810（真正画面外）
     - 优化 Ch2 弹幕敌人入场：增加右下角刷新位置，随机从右上角或右下角入场
 
+  Ver 1.2.9 | 玩家飞机继承体系 + NightElf 三炮战机 + 多枪系统
+    - Player 基类虚方法体系：draw / handleInput / getGunCount / getGunOffset，
+      每种飞机子类自行实现绘制、操控和枪口布局
+    - TrainingPlane（Chapter 1 训练机，原 Ch1Player）：透视三角机身 + 机翼线 +
+      尾翼，单炮布局，保留 getT() 透视定位能力
+    - NightElf（Chapter 2 暗夜精灵）：30° 锐角机头 + 120° 内凹燕尾（以机翼线
+      为对称轴翻转），上半机身扫描线填充，3 炮布局（机头尖端 + 上/下翼尖平行
+      线前端），侧滚模式火力三倍
+    - Druid（第三章备用设计）：双尾翼 boomerang 造型 + 中心导航线，代码已预留，
+      后续章节激活
+    - 多枪射击系统：getGunCount() 返回枪数，getGunOffset(idx) 返回每把枪相对
+      坐标，射击循环遍历所有枪口，addBulletSideScrollAt 支持任意枪位发射
+    - Game 类重构：player 从具体子类改为 Player* 指针，根据章节动态切换
+      TrainingPlane/NightElf；drawPlane()/drawPlaneFlat() 移入各子类 draw()
+    - Ch2ShooterBase/enemy manager 参数泛化：Ch1Player& → Player&，任意飞机
+      均可与第二章敌人系统交互
+    - 无敌闪烁逻辑下沉：从 Game::drawPlaneFlat 移入各子类 draw()，每架飞机自
+      行处理 invFrames 闪烁遮蔽
+
 ================================================================

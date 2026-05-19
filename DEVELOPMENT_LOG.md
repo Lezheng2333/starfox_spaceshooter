@@ -382,12 +382,12 @@ Ver 1.0.1 | 2026-05-08
     - OOP 优化：移除空 public:/private: 声明，移除地形系统遗留的三个 stub
       方法（setForcedTerrain/getForcedTerrain/getCurrentTerrain），提取
       pruneDoubleVec 模板消除接缝裁剪重复代码
+    - 删除地形切换数字键控制（1/2/3/0）和 HUD 地形名称显示
     - BUGFIX: 修复支柱/玻璃在画面左端提前消失问题（裁剪边界从 -200 扩至
       -500，绘制边界扩至 ±100-120px）
     - BUGFIX: 修复地面接缝"桌面弹球"式上下弹跳问题（改为固定 y 位置的水平
       滚动短横线，不再根据屏幕 x 动态计算 y）
     - BUGFIX: 修复玻璃面板依赖的支柱被提前清理导致玻璃半途消失的问题
-    - 删除地形切换数字键控制（1/2/3/0）和 HUD 地形名称显示
 
   Ver 1.2.3 | 章节解锁系统 + Chapter 2 程序化 BGM
     - 新增章节顺序解锁机制：正常游玩模式下，通关当前章节自动解锁下一章
@@ -404,10 +404,10 @@ Ver 1.0.1 | 2026-05-08
       替和弦内声部；Bass 以低音和声基础（C#2/A#1/F2/D#2/G#2）跟随和弦
     - 旋律使用 Pad 包络（柔起音 15%、满延留 80%、缓释放 12%），Bass 使
       用温暖延留包络（平滑起音、85%延留、缓释放 10%），模拟氛围持续音
-    - BUGFIX: ch2Bgm 标志加 volatile 关键字解决音频线程读到主线程旧缓存
-      值的问题（导致进入 Chapter 2 后仍然播放普通 BGM）
     - 章节选择画面光标优化：W/S 上下移动时自动跳过未解锁的灰色章节，仅在
       已解锁章节之间循环
+    - BUGFIX: ch2Bgm 标志加 volatile 关键字解决音频线程读到主线程旧缓存
+      值的问题（导致进入 Chapter 2 后仍然播放普通 BGM）
 
   Ver 1.2.4 | 射击手感优化 + 第二章飞机重设计 + 能量罩系统
     - 外星飞船爆炸音效重设计：从低频轰鸣改为高频短促碎裂感——小爆炸用
@@ -417,8 +417,6 @@ Ver 1.0.1 | 2026-05-08
       的 0.08+0.92*depth，hitRadius=28*scale+10，远处从 ~17px 缩至 ~12px
       （接近 v1.0.0 手感），近处保持 ~38px；瞄准辅助吸附半径与子弹碰撞
       半径完全同步，确保子弹能打中的敌人一定被瞄准辅助锁定
-    - BUGFIX: 子弹命中后未消失问题——碰撞时同时设置 active=false 和
-      canDamage=false 双重标记，增加冗余安全网
     - 第二章飞机可飞行范围扩大至全屏（仅留 10px 四周边距），右侧限制在
       x≤630（HUD 左侧边缘），避免遮挡分数显示
     - 第二章飞机造型重设计：上翼完整（远侧，透视缩窄至 55%）、下翼带可
@@ -432,6 +430,8 @@ Ver 1.0.1 | 2026-05-08
       TELAMONDO，显示在血量条左侧（自适应名称长度）；第二至五章 Boss 配置
       暂用 Ch1 占位，待后续各章专属设计
     - 开始画面版本号同步至 Ver 1.2.4
+    - BUGFIX: 子弹命中后未消失问题——碰撞时同时设置 active=false 和
+      canDamage=false 双重标记，增加冗余安全网
 
   Ver 1.2.5 | 第二章弹幕敌人系统 + 瞄准辅助 + 音效优化
     - 新增 DanmakuManager 类（OOP 封装）：弹幕敌人状态机（入场→无敌射击→
@@ -513,11 +513,11 @@ Ver 1.0.1 | 2026-05-08
       瞄准辅助状态（snapProgress + update + draw），后续章节直接复用
     - PlayerBase 提取：x/y/rollAngle/rollTarget/lastMoveDir/invFrames/aimAssist，
       Ch1Player 继承后添加 handleInput/getT
-    - BUGFIX: 按键 1/2 每帧重复触发 → 添加边沿检测（keyNow && !keyWas）
-    - BUGFIX: 弹幕敌人入场阶段 leg 字段未初始化导致绘制异常
     - 优化 Ch2 普敌入场：只会从画面四条边刷新（startX/y 均在边缘外），突袭到隐形墙
       右侧空间（targetX: 640-780）；右侧入口修正为 x=810（真正画面外）
     - 优化 Ch2 弹幕敌人入场：增加右下角刷新位置，随机从右上角或右下角入场
+    - BUGFIX: 按键 1/2 每帧重复触发 → 添加边沿检测（keyNow && !keyWas）
+    - BUGFIX: 弹幕敌人入场阶段 leg 字段未初始化导致绘制异常
 
   Ver 1.2.9 | 玩家飞机继承体系 + NightElf 三炮战机 + 多枪系统
     - Player 基类虚方法体系：draw / handleInput / getGunCount / getGunOffset，
@@ -542,8 +542,15 @@ Ver 1.0.1 | 2026-05-08
     - 代码重构：MenuKeys 辅助结构消除 4 个屏幕处理器的按键读取样板代码；
       Player::resetState() 消除三架子机 reset() 重复；Ch2ShooterBase::
       computeHPColor() 消除两处 HP 颜色计算重复；消除全部 11 个编译器 warning
-    - BUGFIX: 瞄准辅助遗漏弹幕敌人 — drawAimAssistSide() 新增 dmMgr 的敌人
-      本体和子弹检测
+    - 敌人互斥系统：弹幕敌人 baseY 垂直分散(200-360)；入场目标间距检测(≥80px，
+      最多5次重试)；per-enemy moveSpeed 错开振荡节奏
+    - 玩家受击优化：同一帧只扣一滴血（命中后 break），触发无敌闪烁
+    - 隐形墙碰撞优化：机头位置检测（Player::getNoseOffset()虚方法），NightElf
+      机头不再越过隐形墙
+    - Game Over 界面重构：删除 EXIT，新增 BACK TO MAIN MENU，PLAY AGAIN 改为
+      重新进入当前章节
+    - BUGFIX: 瞄准辅助遗漏弹幕敌人 — drawAimAssistSide() 新增 dmMgr 敌人本体
+      和子弹检测
     - BUGFIX: 玩家受伤 HUD 心心不减少 — Ch2ShooterBase 的 playerHP/gameOver
       改为引用，两个 enemy manager 共享同一份状态
     - BUGFIX: 暂停倒计时粒子/数字错位 — spawnDigitShatter 从切换帧改到每数字
@@ -552,12 +559,5 @@ Ver 1.0.1 | 2026-05-08
       随机 movePhase，入场结束从 0 开始平滑振荡
     - BUGFIX: 倒计时结束暂停菜单闪一帧 — drawPauseMenu 加 paused 条件
     - BUGFIX: 测试模式 Chapter 1 显示飞机2 — 分数选择确认时加 resetGame()调用
-    - 敌人互斥系统：弹幕敌人 baseY 垂直分散(200-360)；入场目标间距检测(≥80px，
-      最多5次重试)；per-enemy moveSpeed 错开振荡节奏
-    - 玩家受击优化：同一帧只扣一滴血（命中后 break），触发无敌闪烁
-    - 隐形墙碰撞优化：机头位置检测（Player::getNoseOffset()虚方法），NightElf
-      机头不再越过隐形墙
-    - Game Over 界面重构：删除 EXIT，新增 BACK TO MAIN MENU，PLAY AGAIN 改为
-      重新进入当前章节
 
 ================================================================

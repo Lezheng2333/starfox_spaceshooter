@@ -2417,7 +2417,8 @@ public:
 
     void spawnEnemy() {
         Ch2DanmakuEnemy e;
-        e.startX = WIN_WIDTH + 40; e.startY = -40;
+        e.startX = WIN_WIDTH + 40;
+        e.startY = (rand() % 2) ? -40 : WIN_HEIGHT + 40;  // top-right or bottom-right corner
         e.targetX = 400 + rand() % 231;  // 400-630, between screen center and invisible wall
         e.targetY = 280;
         e.x = e.startX; e.y = e.startY;
@@ -2614,10 +2615,10 @@ class Ch2AlienManager : public Ch2ShooterBase {
         a.targetX = 640 + rand() % 141;
         a.targetY = 40 + rand() % 521;
         int side = rand() % 4;
-        if (side == 0)      { a.startX = 660; a.startY = 40 + rand() % 521; }
-        else if (side == 1) { a.startX = -10; a.startY = 40 + rand() % 521; }
-        else if (side == 2) { a.startX = 120 + rand() % 481; a.startY = -10; }
-        else                { a.startX = 120 + rand() % 481; a.startY = 610; }
+        if (side == 0)      { a.startX = 810; a.startY = 40 + rand() % 521; }        // right edge (off-screen)
+        else if (side == 1) { a.startX = -10; a.startY = 40 + rand() % 521; }        // left edge (off-screen)
+        else if (side == 2) { a.startX = 40 + rand() % 721; a.startY = -10; }         // top edge (full width)
+        else                { a.startX = 40 + rand() % 721; a.startY = 610; }         // bottom edge (full width)
         a.x = a.startX; a.y = a.startY;
         a.hp = ALIEN_HP; a.active = true; a.entering = true; a.defeated = false;
         a.enterFrame = 0; a.enterDuration = 20 + rand() % 26;

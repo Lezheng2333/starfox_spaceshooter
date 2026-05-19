@@ -168,6 +168,7 @@ struct Ch2DanmakuEnemy : EnemyData {
     double startX, startY, targetX, targetY;  // entrance trajectory
     double baseX, baseY;  // oscillation center (after entrance)
     double movePhase;     // oscillation phase (radians)
+    double moveSpeed;     // per-enemy oscillation speed variation
     int leg, farLeg, nearLeg, vpLean;  // computed leg sizes for collision/draw
     int vulnTimer;         // counts down vulnerable time (0 = done)
     int fireTimer;
@@ -489,9 +490,9 @@ class AudioEngine {
 public:
     AudioEngine() : audioDev(0), bgmVolume(7), sfxVolume(7),
                     eqLow(0), eqMid(0), eqHigh(0), bossMusicOn(false),
+                    ch2Bgm(false),
                     bgmPhase(0), bgmPulsePhase(0), bgmStepCounter(0),
                     bgmNoteIndex(0), bgmNoteFreq(0), bgmNoteLen(0),
-                    ch2Bgm(false),
                     ch2BassIdx(0), ch2BassLen(0), ch2BassFreq(0), ch2BassPhase(0) {
         SDL_AudioSpec want;
         SDL_memset(&want, 0, sizeof(want));
@@ -872,10 +873,15 @@ public:
     void setRollAngle(double ra) { rollAngle = ra; }
     void setInvFrames(int f) { invFrames = f; }
     void updateInvFrames() { if (invFrames > 0) invFrames--; }
-    virtual void draw(SDL_Renderer* r) const {}
-    virtual void handleInput(const Uint8* keys) {}
+    void resetState() {
+        rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
+        invFrames = 0;
+    }
+    virtual void draw(SDL_Renderer*) const {}
+    virtual void handleInput(const Uint8*) {}
     virtual int getGunCount() const { return 1; }
-    virtual void getGunOffset(int idx, int& ox, int& oy) const { ox = 14; oy = 0; }
+    virtual void getGunOffset(int, int& ox, int& oy) const { ox = 14; oy = 0; }
+    virtual int getNoseOffset() const { return 14; }
 };
 
 // ============== TrainingPlane (Chapter 1 perspective movement) ==============
@@ -920,8 +926,7 @@ public:
 
     void reset() {
         x = CENTER_X; y = WIN_HEIGHT - 80;
-        rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
-        invFrames = 0;
+        resetState();
     }
 
     void handleInput(const Uint8* keys) {
@@ -971,8 +976,7 @@ public:
 
     void reset() {
         x = 100; y = WIN_HEIGHT / 2;
-        rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
-        invFrames = 0;
+        resetState();
     }
 
     void draw(SDL_Renderer* r) const override {
@@ -1019,6 +1023,7 @@ public:
         else if (idx == 1) { ox = 29; oy = -8; }   // upper wing tip
         else               { ox = 29; oy = 8; }    // lower wing tip
     }
+    int getNoseOffset() const override { return 32; }
 };
 
 // ============== Druid (plane 3, saved design) ==============
@@ -1028,8 +1033,7 @@ public:
 
     void reset() {
         x = 100; y = WIN_HEIGHT / 2;
-        rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
-        invFrames = 0;
+        resetState();
     }
 
     void draw(SDL_Renderer* r) const {
@@ -1846,7 +1850,7 @@ public:
 
     // Shared absorb state machine (deduplicated from INTRO and PHASE2)
     bool updateAbsorbStateMachine(Ch1AlienManager& aliens, Ch1BulletManager& bullets,
-                                   Ch1ParticleManager& pm, AudioEngine* audio) {
+                                   Ch1ParticleManager&, AudioEngine*) {
         if (absorbCooldown > 0) absorbCooldown--;
 
         if (absorbState == IDLE) {
@@ -2009,7 +2013,6 @@ public:
         int baseW = (int)((double)hp / maxHp * BAR_W);
         if (baseW > BAR_W) baseW = BAR_W;
         int bonusW = (int)((double)bonusHp / maxHp * BAR_W);
-        int totalW = baseW + bonusW;
 
         SDL_SetRenderDrawColor(renderer, 220, 30, 30, 255);
         SDL_Rect baseR = {BAR_X, BAR_Y, baseW, BAR_H};
@@ -2439,8 +2442,8 @@ private:
 class Ch2ShooterBase {
 protected:
     std::vector<Ch2EnemyBullet> bullets;
-    int playerHP;
-    bool gameOver;
+    int& hpRef;
+    bool& goRef;
 
     void updateBullets(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
                        Player& pl, FloatingTextManager& ftMgr) {
@@ -2469,23 +2472,28 @@ protected:
                 if (!eb.active) continue;
                 double dx = pl.getX() - eb.x, dy = pl.getY() - eb.y;
                 if (dx*dx + dy*dy < 16.0*16.0) {
-                    eb.active = false; playerHP--;
+                    eb.active = false; hpRef--;
                     pl.setInvFrames(60);  // 1 second invincibility
                     particleMgr.spawnExplosion(eb.x, eb.y, 8); audio.sndPlayerHit();
                     ftMgr.spawn((float)pl.getX()+1, (float)(pl.getY()-19), "HP -1", 0,0,0);
                     ftMgr.spawn((float)pl.getX(), (float)(pl.getY()-20), "HP -1", 255,50,50);
-                    if (playerHP <= 0) { gameOver = true; playerHP = 0; }
+                    if (hpRef <= 0) { goRef = true; hpRef = 0; }
+                    break;  // only one hit per frame
                 }
             }
         }
     }
 
 public:
-    Ch2ShooterBase() : playerHP(3), gameOver(false) {}
-    bool isGameOver() const { return gameOver; }
-    int getPlayerHP() const { return playerHP; }
+    Ch2ShooterBase(int& hp, bool& go) : hpRef(hp), goRef(go) {}
+    bool isGameOver() const { return goRef; }
+    int getPlayerHP() const { return hpRef; }
     const std::vector<Ch2EnemyBullet>& getBullets() const { return bullets; }
-    void resetBase() { bullets.clear(); playerHP = 3; gameOver = false; }
+    void resetBase() { bullets.clear(); hpRef = 3; goRef = false; }
+
+    static void computeHPColor(double hpR, int& r, int& g, int& b) {
+        r = 255; g = (int)(150*hpR + 80*(1-hpR)); b = (int)(100*hpR + 30*(1-hpR));
+    }
 
     void drawBullets(SDL_Renderer* r) const {
         for (const auto& b : bullets) {
@@ -2552,15 +2560,30 @@ class Ch2DanmakuManager : public Ch2ShooterBase {
     }
 
 public:
-    Ch2DanmakuManager() {}
+    Ch2DanmakuManager(int& hp, bool& go) : Ch2ShooterBase(hp, go) {}
     void reset() { enemies.clear(); resetBase(); }
 
     void spawnEnemy() {
         Ch2DanmakuEnemy e;
         e.startX = WIN_WIDTH + 40;
         e.startY = (rand() % 2) ? -40 : WIN_HEIGHT + 40;  // top-right or bottom-right corner
-        e.targetX = 400 + rand() % 231;  // 400-630, between screen center and invisible wall
-        e.targetY = 280;
+
+        // Find non-overlapping target position (up to 5 retries)
+        int tries = 0;
+        bool blocked;
+        do {
+            e.targetX = 400 + rand() % 231;    // 400-630
+            e.targetY = 200 + rand() % 161;    // 200-360, vertical spread
+            blocked = false;
+            for (const auto& ex : enemies) {
+                if (!ex.active || ex.defeated) continue;
+                double dx = e.targetX - ex.baseX;
+                double dy = e.targetY - ex.baseY;
+                if (dx*dx + dy*dy < 80.0*80.0) { blocked = true; break; }
+            }
+            tries++;
+        } while (blocked && tries < 5);
+
         e.x = e.startX; e.y = e.startY;
         e.baseX = e.targetX; e.baseY = e.targetY;
         e.movePhase = 0;
@@ -2607,11 +2630,12 @@ public:
                     e.fireTimer = 0; e.fireAngle = 0;
                     e.baseX = e.targetX; e.baseY = e.targetY;
                     e.movePhase = 0;
+                    e.moveSpeed = 0.005 + (rand() % 40) / 10000.0;  // 0.005~0.009
                 }
                 continue;
             }
 
-            e.movePhase += 0.007;
+            e.movePhase += e.moveSpeed;
             double osc = std::sin(e.movePhase) * 55.0;
             double vdx = e.baseX - 400, vdy = e.baseY + 60;
             double vlen = std::sqrt(vdx*vdx + vdy*vdy);
@@ -2699,10 +2723,7 @@ public:
             }
             int rCol, gCol, bCol;
             if (e.entering || e.invincibleFrames > 0) { rCol=100; gCol=180; bCol=255; }
-            else {
-                double hpR = (double)e.hp / e.maxHp;
-                rCol=255; gCol=(int)(150*hpR+80*(1-hpR)); bCol=(int)(100*hpR+30*(1-hpR));
-            }
+            else computeHPColor((double)e.hp / e.maxHp, rCol, gCol, bCol);
             SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
             int fl = e.farLeg, nl = e.nearLeg, vl = e.vpLean;
             SDL_Point lt[3] = {{ex - vl, ey}, {ex - fl, ey - fl + vl}, {ex - fl, ey + fl}};
@@ -2768,7 +2789,7 @@ class Ch2AlienManager : public Ch2ShooterBase {
     }
 
 public:
-    Ch2AlienManager() {}
+    Ch2AlienManager(int& hp, bool& go) : Ch2ShooterBase(hp, go) {}
     void reset() { aliens.clear(); resetBase(); }
     void forceSpawn() { spawnOne(); }
     const std::vector<Ch2Alien>& getAliens() const { return aliens; }
@@ -2838,10 +2859,7 @@ public:
             int ex = (int)a.x, ey = (int)a.y, sz = 12;
             int rCol, gCol, bCol;
             if (a.entering || a.invincibleFrames > 0) { rCol=100; gCol=180; bCol=255; }
-            else {
-                double hpR = (double)a.hp / ALIEN_HP;
-                rCol=255; gCol=(int)(150*hpR+80*(1-hpR)); bCol=(int)(100*hpR+30*(1-hpR));
-            }
+            else computeHPColor((double)a.hp / ALIEN_HP, rCol, gCol, bCol);
             if (a.entering && a.enterFrame > 3) {
                 for (int k = 1; k <= 3; ++k) {
                     double pRaw = (double)(a.enterFrame - k*3) / a.enterDuration;
@@ -3101,6 +3119,16 @@ public:
 
 
 // ============== Game 类 ==============
+// Small helper: reads the 4 standard menu keys at once
+struct MenuKeys {
+    bool up, down, enter, esc;
+    MenuKeys(const Uint8* keys) :
+        up(keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]),
+        down(keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN]),
+        enter(keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE]),
+        esc(keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE]) {}
+};
+
 enum GamePhase { PHASE_PLAY, PHASE_BOSS_INTRO, PHASE_BOSS_FIGHT, PHASE_BOSS_PHASE2, PHASE_BOSS_DEFEAT };
 
 class Game {
@@ -3119,7 +3147,6 @@ class Game {
     FloatingTextManager floatingTextMgr;
     ChapterManager chapterMgr;
 
-    SDL_Window* window;
     SDL_Texture* shakeTex;
 
     // Core state
@@ -3162,6 +3189,7 @@ class Game {
     int wallAnimFrame;     // animates lightning/sparks while touching
 
     // Ch2 enemy systems
+    int ch2PlayerHP; bool ch2GameOver;
     Ch2AlienManager ch2AlienMgr;
     Ch2DanmakuManager dmMgr;
     int dmFireCooldown;    // player fire cooldown in side-scroll mode
@@ -3179,9 +3207,9 @@ class Game {
     Ch2Background* sideBg;
 
 public:
-    Game(Renderer& r, AudioEngine& a, SDL_Window* w)
-        : renderer(r), audio(a), window(w), shakeTex(nullptr),
-          player(&trainingPlane),
+    Game(Renderer& r, AudioEngine& a, SDL_Window*)
+        : renderer(r), audio(a),
+          player(&trainingPlane), shakeTex(nullptr),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
           paused(false), gameOver(false), aimAssistOn(false),
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
@@ -3194,9 +3222,12 @@ public:
           missionCompleteShown(false), missionComplete(false),
           isNormalPlay(false),
           wallFlashTimer(0), wallContactY(0), wallAnimFrame(0),
+          ch2PlayerHP(3), ch2GameOver(false),
+          ch2AlienMgr(ch2PlayerHP, ch2GameOver), dmMgr(ch2PlayerHP, ch2GameOver),
           dmFireCooldown(0),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
-          leftWas(false), rightWas(false), key1Was(false), key2Was(false), lastShockwaveLevel(0), background(nullptr), sideBg(nullptr) {
+          leftWas(false), rightWas(false), key1Was(false), key2Was(false), lastShockwaveLevel(0),
+          background(nullptr), sideBg(nullptr) {
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         background = new Ch1Background(chapterMgr.getConfig());
         sideBg = new Ch2Background();
@@ -3299,7 +3330,7 @@ public:
                 updatePaused(keys, running);
                 drawGameplayFrame();
                 if (countdown >= 0) drawCountdown();
-                else drawPauseMenu();
+                else if (paused) drawPauseMenu();
             } else {
                 // ======== GAMEPLAY ========
                 updateGameplay(keys);
@@ -3381,20 +3412,17 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.9", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.10", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
     void updateChapterScreen(const Uint8* keys) {
         static bool cJustEntered = true;
-        bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
-        bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
-        bool escNow = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
-        if (cJustEntered) { upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow; cJustEntered=false; }
-        if (upNow && !upWas)    { do { chapterSelection = (chapterSelection - 1 + 5) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
-        if (downNow && !downWas) { do { chapterSelection = (chapterSelection + 1) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
-        if (enterNow && !enterWas) {
+        MenuKeys mk(keys);
+        if (cJustEntered) { upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc; cJustEntered=false; }
+        if (mk.up && !upWas)    { do { chapterSelection = (chapterSelection - 1 + 5) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
+        if (mk.down && !downWas) { do { chapterSelection = (chapterSelection + 1) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
+        if (mk.enter && !enterWas) {
             if (chapterMgr.isUnlocked(chapterSelection)) {
                 chapterMgr.selectChapter(chapterSelection);
                 resetGame(); atStartScreen = false; atChapterSelect = false;
@@ -3404,8 +3432,8 @@ private:
                 shockwaveMgr.updateParams(0);
             }
         }
-        if (escNow && !escWas) { atChapterSelect = false; atStartScreen = true; cJustEntered = true; }
-        upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow;
+        if (mk.esc && !escWas) { atChapterSelect = false; atStartScreen = true; cJustEntered = true; }
+        upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc;
     }
 
     void drawChapterScreen() {
@@ -3436,17 +3464,14 @@ private:
     // ======== TEST SCREEN ========
     void updateTestScreen(const Uint8* keys) {
         static bool tJustEntered = true;
-        bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
-        bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
-        bool escNow = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
-        if (tJustEntered) { upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow; tJustEntered=false; return; }
+        MenuKeys mk(keys);
+        if (tJustEntered) { upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc; tJustEntered=false; return; }
         if (testAtChapterSelect) {
             // Level 1: Chapter selection
-            if (escNow && !escWas) { atTestSelect = false; atStartScreen = true; tJustEntered = true; }
-            if (upNow && !upWas)       testChapterSelection = (testChapterSelection - 1 + 5) % 5;
-            if (downNow && !downWas)   testChapterSelection = (testChapterSelection + 1) % 5;
-            if (enterNow && !enterWas) {
+            if (mk.esc && !escWas) { atTestSelect = false; atStartScreen = true; tJustEntered = true; }
+            if (mk.up && !upWas)       testChapterSelection = (testChapterSelection - 1 + 5) % 5;
+            if (mk.down && !downWas)   testChapterSelection = (testChapterSelection + 1) % 5;
+            if (mk.enter && !enterWas) {
                 if (testChapterSelection == 0) { chapterMgr.selectChapter(0); testAtChapterSelect = false; tJustEntered = true; }
                 else if (testChapterSelection == 1) {
                     // Chapter 2: start side-scrolling demo immediately
@@ -3462,13 +3487,17 @@ private:
             }
         } else {
             // Level 2: Score/target selection for selected chapter
-            if (escNow && !escWas) { testAtChapterSelect = true; tJustEntered = true; }
-            if (upNow && !upWas)     testScoreSelection = (testScoreSelection - 1 + 9) % 9;
-            if (downNow && !downWas) testScoreSelection = (testScoreSelection + 1) % 9;
-        if (enterNow && !enterWas) {
+            if (mk.esc && !escWas) { testAtChapterSelect = true; tJustEntered = true; }
+            if (mk.up && !upWas)     testScoreSelection = (testScoreSelection - 1 + 9) % 9;
+            if (mk.down && !downWas) testScoreSelection = (testScoreSelection + 1) % 9;
+        if (mk.enter && !enterWas) {
+            resetGame();
             atTestSelect = false; tJustEntered = true;
             atStartScreen = false;
             isNormalPlay = false;
+            alienMgr.applyChapterConfig(chapterMgr.getConfig());
+            bulletMgr.updateParams(0);
+            shockwaveMgr.updateParams(0);
             const int testScores[6] = {30, 60, 90, 120, 150, 180};
             if (testScoreSelection < 6) {
                 score = testScores[testScoreSelection];
@@ -3541,7 +3570,7 @@ private:
             }
         }
     }
-        upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow;
+        upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc;
     }
 
     void drawTestScreen() {
@@ -3594,23 +3623,20 @@ private:
     // ======== OPTIONS SCREEN ========
     void updateOptionScreen(const Uint8* keys) {
         static bool oJustEntered = true;
-        bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
-        bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
-        bool escNow = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
-        if (oJustEntered) { upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow; oJustEntered=false; }
-        if (upNow && !upWas)    optionCursor = (optionCursor - 1 + 2) % 2;
-        if (downNow && !downWas) optionCursor = (optionCursor + 1) % 2;
-        if (enterNow && !enterWas) {
+        MenuKeys mk(keys);
+        if (oJustEntered) { upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc; oJustEntered=false; }
+        if (mk.up && !upWas)    optionCursor = (optionCursor - 1 + 2) % 2;
+        if (mk.down && !downWas) optionCursor = (optionCursor + 1) % 2;
+        if (mk.enter && !enterWas) {
             if (optionCursor == 0) aimAssistOn = !aimAssistOn;
             else if (optionCursor == 1) { atSoundMenu = true; oJustEntered = true; }
         }
-        if (escNow && !escWas) {
+        if (mk.esc && !escWas) {
             optionCursor = 0; atOptionScreen = false; oJustEntered = true;
             if (optionFromPause) paused = true;
             else atStartScreen = true;
         }
-        upWas=upNow; downWas=downNow; enterWas=enterNow; escWas=escNow;
+        upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc;
     }
 
     void drawOptionScreen() {
@@ -3646,20 +3672,17 @@ private:
     // ======== SOUND MENU ========
     void updateSoundMenu(const Uint8* keys) {
         static bool sJustEntered = true;
-        bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
-        bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+        MenuKeys mk(keys);
         bool leftNow = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
         bool rightNow = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
-        bool escNow = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
         if (sJustEntered) {
-            upWas=upNow; downWas=downNow; escWas=escNow; enterWas=enterNow;
+            upWas=mk.up; downWas=mk.down; escWas=mk.esc; enterWas=mk.enter;
             leftWas=leftNow; rightWas=rightNow; sJustEntered=false;
         }
-        if (upNow && !upWas)    soundCursor = (soundCursor - 1 + 6) % 6;
-        if (downNow && !downWas) soundCursor = (soundCursor + 1) % 6;
-        if (escNow && !escWas)  { atSoundMenu = false; sJustEntered = true; }
-        if (enterNow && !enterWas && soundCursor == 5) { atSoundMenu = false; sJustEntered = true; }
+        if (mk.up && !upWas)    soundCursor = (soundCursor - 1 + 6) % 6;
+        if (mk.down && !downWas) soundCursor = (soundCursor + 1) % 6;
+        if (mk.esc && !escWas)  { atSoundMenu = false; sJustEntered = true; }
+        if (mk.enter && !enterWas && soundCursor == 5) { atSoundMenu = false; sJustEntered = true; }
 
         if (leftNow && !leftWas) {
             if (soundCursor == 0) audio.adjBgmVolume(-1);
@@ -3675,7 +3698,7 @@ private:
             if (soundCursor == 3) audio.adjEqMid(1);
             if (soundCursor == 4) audio.adjEqHigh(1);
         }
-        upWas=upNow; downWas=downNow; escWas=escNow; enterWas=enterNow;
+        upWas=mk.up; downWas=mk.down; escWas=mk.esc; enterWas=mk.enter;
         leftWas=leftNow; rightWas=rightNow;
     }
 
@@ -3735,8 +3758,9 @@ private:
             if (py < 10) py = 10;
             if (py > WIN_HEIGHT - 10) py = WIN_HEIGHT - 10;
 
-            if (px > 630) {
-                px = 630;
+            int noseX = px + player->getNoseOffset();
+            if (noseX > 642) {
+                px = 642 - player->getNoseOffset();
                 wallFlashTimer = 28; wallContactY = py; wallAnimFrame++;
             } else if (wallFlashTimer > 0) { wallFlashTimer--; wallAnimFrame++; }
 
@@ -3766,9 +3790,8 @@ private:
             }
             player->updateInvFrames();
             ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr);
-            if (ch2AlienMgr.isGameOver()) gameOver = true;
             dmMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr);
-            if (dmMgr.isGameOver()) gameOver = true;
+            if (ch2GameOver) gameOver = true;
 
             floatingTextMgr.update();
             particleMgr.update();
@@ -4128,7 +4151,7 @@ private:
                 dmMgr.drawBullets(renderer.get());
                 // Ch2 HUD: all aligned to rightEdge = WIN_WIDTH - 10
                 HUDBase::drawScore(renderer.get(), font, score, WIN_WIDTH - 10, 10);
-                HUDBase::drawHPHearts(renderer.get(), font, ch2AlienMgr.getPlayerHP(), 3, WIN_WIDTH - 10, 28);
+                HUDBase::drawHPHearts(renderer.get(), font, ch2PlayerHP, 3, WIN_WIDTH - 10, 28);
                 HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, 0.0f);  // frozen for now
                 if (!isNormalPlay) font.drawString(renderer.get(), "press 1/2", 10, 10, 2);
                 if (aimAssistOn) drawAimAssistSide();
@@ -4294,7 +4317,7 @@ private:
             }
         }
 
-        // Check Ch2 crystal bullets
+        // Check Ch2 crystal bullets (from regular aliens)
         auto& cbullets = ch2AlienMgr.getBullets();
         for (const auto& cb : cbullets) {
             if (!cb.active) continue;
@@ -4302,6 +4325,28 @@ private:
             if (t > 0) {
                 double lateral = std::fabs(cb.y - py);
                 if (lateral < 16.0 && t < bestT) { bestT = t; snapX = cb.x; snapY = cb.y; }
+            }
+        }
+
+        // Check danmaku enemies (vulnerability window)
+        for (const auto& de : dmMgr.getEnemies()) {
+            if (de.active && !de.entering && de.invincibleFrames <= 0 && de.vulnTimer > 0) {
+                double t = de.x - px;
+                if (t > 0) {
+                    double lateral = std::fabs(de.y - py);
+                    if (lateral < 24.0 && t < bestT) { bestT = t; snapX = de.x; snapY = de.y; }
+                }
+            }
+        }
+
+        // Check danmaku enemy bullets
+        auto& dbullets = dmMgr.getBullets();
+        for (const auto& db : dbullets) {
+            if (!db.active) continue;
+            double t = db.x - px;
+            if (t > 0) {
+                double lateral = std::fabs(db.y - py);
+                if (lateral < 16.0 && t < bestT) { bestT = t; snapX = db.x; snapY = db.y; }
             }
         }
 
@@ -4363,12 +4408,14 @@ private:
     // ======== PAUSED ========
     void updatePaused(const Uint8* keys, bool& running) {
         if (countdown >= 0) {
+            if (countdownFrame == 0) {
+                particleMgr.spawnDigitShatter(font, '0' + countdown, 18, CENTER_X, WIN_HEIGHT/2);
+            }
             countdownFrame++;
             particleMgr.update();
             particleMgr.removeInactive();
             if (countdownFrame >= 45) {
                 countdownFrame = 0;
-                particleMgr.spawnDigitShatter(font, '0' + countdown, 18, CENTER_X, WIN_HEIGHT/2);
                 countdown--;
                 if (countdown <= 0) {
                     paused = false; countdown = -1;
@@ -4437,7 +4484,7 @@ private:
     }
 
     // ======== GAME OVER ========
-    void updateGameOverScreen(const Uint8* keys, bool& running) {
+    void updateGameOverScreen(const Uint8* keys, bool&) {
         static bool upWas2 = false, downWas2 = false, enterWas2 = false;
         bool upNow2 = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
         bool downNow2 = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
@@ -4445,8 +4492,19 @@ private:
         if (upNow2 && !upWas2)   menuSelection = (menuSelection - 1 + 2) % 2;
         if (downNow2 && !downWas2) menuSelection = (menuSelection + 1) % 2;
         if (enterNow2 && !enterWas2) {
-            if (menuSelection == 0) resetGame();
-            else running = false;
+            if (menuSelection == 0) {
+                // PLAY AGAIN: restart current chapter
+                bool wasNormal = isNormalPlay;
+                resetGame();
+                atStartScreen = false; atChapterSelect = false;
+                isNormalPlay = wasNormal;
+                alienMgr.applyChapterConfig(chapterMgr.getConfig());
+                bulletMgr.updateParams(0);
+                shockwaveMgr.updateParams(0);
+            } else {
+                // BACK TO MAIN MENU
+                resetGame(); atStartScreen = true;
+            }
         }
         upWas2 = upNow2; downWas2 = downNow2; enterWas2 = enterNow2;
         particleMgr.update();
@@ -4461,7 +4519,7 @@ private:
         snprintf(buf, sizeof(buf), "SCORE:%-4d", score);
         int scoreW = (int)strlen(buf) * 6 * 4;
         font.drawString(r, buf, CENTER_X - scoreW/2, 210, 4);
-        const char* items[2] = {"PLAY AGAIN", "EXIT"};
+        const char* items[2] = {"PLAY AGAIN", "BACK TO MAIN MENU"};
         const int MENU_Y0 = 340;
         for (int i = 0; i < 2; ++i) {
             int itemW = (int)strlen(items[i]) * 6 * 3;
@@ -4513,7 +4571,7 @@ private:
 
 
 // ============== MAIN ==============
-int main(int argc, char* argv[]) {
+int main() {
     srand((unsigned)time(nullptr));
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {

@@ -538,4 +538,26 @@ Ver 1.0.1 | 2026-05-08
     - 无敌闪烁逻辑下沉：从 Game::drawPlaneFlat 移入各子类 draw()，每架飞机自
       行处理 invFrames 闪烁遮蔽
 
+  Ver 1.2.10 | 代码质量提升 + 敌人互斥 + 碰撞优化 + Bug 修复
+    - 代码重构：MenuKeys 辅助结构消除 4 个屏幕处理器的按键读取样板代码；
+      Player::resetState() 消除三架子机 reset() 重复；Ch2ShooterBase::
+      computeHPColor() 消除两处 HP 颜色计算重复；消除全部 11 个编译器 warning
+    - BUGFIX: 瞄准辅助遗漏弹幕敌人 — drawAimAssistSide() 新增 dmMgr 的敌人
+      本体和子弹检测
+    - BUGFIX: 玩家受伤 HUD 心心不减少 — Ch2ShooterBase 的 playerHP/gameOver
+      改为引用，两个 enemy manager 共享同一份状态
+    - BUGFIX: 暂停倒计时粒子/数字错位 — spawnDigitShatter 从切换帧改到每数字
+      第一帧触发
+    - BUGFIX: 弹幕敌人入场后瞬移 — 用 per-enemy moveSpeed(0.005~0.009)替代
+      随机 movePhase，入场结束从 0 开始平滑振荡
+    - BUGFIX: 倒计时结束暂停菜单闪一帧 — drawPauseMenu 加 paused 条件
+    - BUGFIX: 测试模式 Chapter 1 显示飞机2 — 分数选择确认时加 resetGame()调用
+    - 敌人互斥系统：弹幕敌人 baseY 垂直分散(200-360)；入场目标间距检测(≥80px，
+      最多5次重试)；per-enemy moveSpeed 错开振荡节奏
+    - 玩家受击优化：同一帧只扣一滴血（命中后 break），触发无敌闪烁
+    - 隐形墙碰撞优化：机头位置检测（Player::getNoseOffset()虚方法），NightElf
+      机头不再越过隐形墙
+    - Game Over 界面重构：删除 EXIT，新增 BACK TO MAIN MENU，PLAY AGAIN 改为
+      重新进入当前章节
+
 ================================================================

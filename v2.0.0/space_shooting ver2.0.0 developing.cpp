@@ -3592,7 +3592,7 @@ class Game {
     bool aimAssistOn;
     bool inNarration;
     bool ch1DialogueDone;
-    bool triggeredScores[64];
+    bool triggeredScores[256];
     int baseFireTimer;
     int lastScore;
     bool pauseHistoryFocused;

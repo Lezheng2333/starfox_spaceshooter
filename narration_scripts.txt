@@ -8,28 +8,43 @@
 玛莎登上一边登上飞机，准备起飞迎战，一边向塔台汇报：“只找到一架教练机了，我准备起飞”
 塔台没有回应，传来一阵噪声……
 
-Stellar Calendar 24th
-In the deep space.
-The "Life" base.
+Stellar Calendar 24th\n
+In the deep space.\n
+The "Life" base.\n
+\n\n
+Martha aces her final test.\n
+She's now a “Huntress”.\n
+\n\n
+Off the plane.\n
+Heading for the rest area.\n
+\n\n
+A series of massive explosions behind her.\n
+She turns –\n
+\n\n
+All main fighters.\n Wreckage.\n
+\n\n
+Tower: "Unknown objects approaching!\n All fighters scramble!"\n
+\n\n
+Martha runs back to the hangar.\n
+Only one old trainer left.\n
+\n\n
+Into the cockpit. Engines up. She reports:\n
+"I'm taking off."\n
+\n\n
+No answer from the tower.\n
+Only a sharp, harsh noise.\n
 
-Martha aces her final test.
-She's now a “Huntress”.
+第一章游戏进行时：
+得分0:
+队友1:“玛莎，现在只有你起飞了”
+队友1：“你尽可能撑住，基地的防御炮正在准备”
 
-Off the plane.
-Heading for the rest area.
+得分3:
+队友1:“这些敌人都是能量体构成的，击碎他们，我们可以得到能量”
 
-A series of massive explosions behind her.
-She turns –
+得分20:
+塔台恢复通讯:“防御炮已经准备好了”
+塔台：“还需要一点点能量！”
 
-All main fighters. Wreckage.
-
-Tower: "Unknown objects approaching! All fighters scramble!"
-
-Martha runs back to the hangar.
-Only one old trainer left.
-
-Into the cockpit. Engines up. She reports:
-"Only this trainer left. I'm taking off."
-
-No answer from the tower.
-Only a sharp, harsh noise.
+得分33:
+塔台：“”

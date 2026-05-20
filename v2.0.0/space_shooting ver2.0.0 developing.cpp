@@ -229,7 +229,7 @@ public:
         setChar('d', "\x01\x01\x0F\x11\x11\x11\x0F");
         setChar('e', "\x00\x00\x0E\x11\x1F\x10\x0E");
         setChar('f', "\x02\x04\x0E\x04\x04\x04\x0E");
-        setChar('g', "\x00\x0E\x11\x11\x0E\x01\x06");
+        setChar('g', "\x00\x0E\x11\x0F\x01\x11\x1F");
         setChar('h', "\x10\x10\x16\x19\x11\x11\x11");
         setChar('i', "\x04\x00\x0C\x04\x04\x04\x0E");
         setChar('j', "\x02\x00\x06\x02\x02\x12\x0C");
@@ -250,7 +250,7 @@ public:
         setChar('z', "\x00\x00\x1F\x02\x04\x08\x1F");
         setChar(' ', "\x00\x00\x00\x00\x00\x00\x00");
         setChar('!', "\x04\x04\x04\x04\x00\x00\x04");
-        setChar('"', "\x15\x15\x00\x00\x00\x00\x00");
+        setChar('"', "\x0A\x0A\x00\x00\x00\x00\x00");
         setChar('#', "\x0A\x0A\x1F\x0A\x1F\x0A\x0A");
         setChar('$', "\x04\x1E\x14\x0E\x05\x1E\x04");
         setChar('%', "\x11\x01\x02\x04\x08\x10\x11");
@@ -814,6 +814,7 @@ public:
         bgTimer = 0;
         enterWas = false;
         dQueue.clear();
+        dialogueHistory.clear();
         dIdx = 0; dActive = false; dEnterWas = false; dTicks = 0; cTicks = 0;
     }
 
@@ -920,7 +921,7 @@ public:
         dl.text = text;
         dl.speaker = speaker ? speaker : "";
         dl.sameSpeaker = false;
-        dl.state = 0; dl.timer = 0; dl.revealed = 0; dl.typeTimer = 0;
+        dl.state = 0; dl.timer = 0; dl.revealed = 0; dl.typeTimer = 0; dl.historyRecorded = false;
         dl.y = 200.0f; dl.fadeStartY = 0;
         std::string s(text);
         while ((int)s.length() > D_WRAP) {
@@ -963,7 +964,7 @@ public:
         if (!dActive || dIdx >= (int)dQueue.size()) { dActive = false; return; }
         auto& dl = dQueue[dIdx];
 
-        // ENTER/SPACE skips typewriter or dismisses current line
+        // ENTER skips typewriter or dismisses current line
         bool skip = enterPressed && !dEnterWas;
 
         int totalChars = 0;
@@ -992,12 +993,20 @@ public:
                 double ease = 1.0 - std::pow(1.0 - t, 3.0);
                 dl.y = dl.fadeStartY - (float)(50.0 * ease);
                 if (skip || dl.timer >= D_FADE) {
-                    bool wasSame = dl.sameSpeaker;
+                    // Record to history when line fully fades out
+                    if (!dl.historyRecorded) {
+                        dl.historyRecorded = true;
+                        HistoryLine hl;
+                        hl.speaker = dl.speaker;
+                        hl.lines = dl.lines;
+                        hl.numLines = dl.numLines;
+                        dialogueHistory.push_back(hl);
+                    }
                     dIdx++;
                     if (dIdx >= (int)dQueue.size()) { dActive = false; dEnterWas = enterPressed; return; }
                     auto& next = dQueue[dIdx];
                     next.state = 1; next.timer = 0; next.revealed = 0; next.typeTimer = 0;
-                    next.y = wasSame ? dl.fadeStartY : 200.0f;
+                    next.y = 200.0f;
                 }
                 break;
             }
@@ -1033,20 +1042,10 @@ public:
         int rr = (int)(TR * bright), gg = (int)(TG * bright), bb = (int)(TB * bright);
         int sr = (int)(180 * bright), sg = (int)(200 * bright), sb = (int)(160 * bright);
 
-        // Speaker name (if present)
         int speakerH = 0;
-        if (!dl.speaker.empty()) {
-            speakerH = CH_H + 2;
-            SDL_SetRenderDrawColor(r, (Uint8)sr, (Uint8)sg, (Uint8)sb, 255);
-            int tx = drawX + PAD_X, ty = drawY + PAD_Y;
-            for (char c : dl.speaker) {
-                if (c == ' ') { tx += CH_W; continue; }
-                font.drawChar(r, c, tx, ty, 1, 2);
-                tx += CH_W;
-            }
-        }
+        if (!dl.speaker.empty()) speakerH = CH_H + 2;
 
-        // Content lines
+        // Content
         int charsLeft = dl.revealed;
         SDL_SetRenderDrawColor(r, (Uint8)rr, (Uint8)gg, (Uint8)bb, 255);
         for (int li = 0; li < dl.numLines && charsLeft > 0; ++li) {
@@ -1062,13 +1061,25 @@ public:
             }
             charsLeft -= show;
         }
+
+        // Speaker (on top)
+        if (!dl.speaker.empty()) {
+            SDL_SetRenderDrawColor(r, (Uint8)sr, (Uint8)sg, (Uint8)sb, 255);
+            int tx = drawX + PAD_X, ty = drawY + PAD_Y;
+            for (char c : dl.speaker) {
+                if (c == ' ') { tx += CH_W; continue; }
+                font.drawChar(r, c, tx, ty, 1, 2);
+                tx += CH_W;
+            }
+        }
     }
 
 private:
     struct DLine {
         std::string text;
-        std::string speaker;         // speaker name (empty = no label)
-        bool sameSpeaker;            // true if next line is from same speaker
+        std::string speaker;
+        bool sameSpeaker;
+        bool historyRecorded;
         std::vector<std::string> lines;
         int numLines;
         int state;
@@ -1082,6 +1093,17 @@ private:
     static const int D_POPUP = 15;
     static const int D_FADE = 40;
     static const int D_WRAP = 38;    // chars per line
+
+    struct HistoryLine {
+        std::string speaker;
+        std::vector<std::string> lines;
+        int numLines;
+    };
+    std::vector<HistoryLine> dialogueHistory;
+
+public:
+    const std::vector<HistoryLine>& getHistory() const { return dialogueHistory; }
+private:
 
     std::vector<DLine> dQueue;
     int dIdx;
@@ -3506,7 +3528,7 @@ public:
     void update(const Uint8* keys) {
         bool upNow   = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
         bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+        bool enterNow = keys[SDL_SCANCODE_RETURN];
         bool escNow   = keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE];
         bool leftNow  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
         bool rightNow = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
@@ -3531,11 +3553,11 @@ public:
         }
 
         if (upNow && !upWas) {
-            if (currentScreen == SOUND) soundCursor = (soundCursor - 1 + maxItems) % maxItems;
+            if (currentScreen == SOUND && soundCursor > 0) soundCursor--;
             else cursor = (cursor - 1 + maxItems) % maxItems;
         }
         if (downNow && !downWas) {
-            if (currentScreen == SOUND) soundCursor = (soundCursor + 1) % maxItems;
+            if (currentScreen == SOUND && soundCursor < maxItems - 1) soundCursor++;
             else cursor = (cursor + 1) % maxItems;
         }
         upWas = upNow; downWas = downNow; enterWas = enterNow;
@@ -3544,7 +3566,7 @@ public:
 
     bool isEnterPressed() const {
         const Uint8* keys = SDL_GetKeyboardState(NULL);
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+        bool enterNow = keys[SDL_SCANCODE_RETURN];
         return enterNow && !enterWas;
     }
 
@@ -3578,7 +3600,7 @@ struct MenuKeys {
     MenuKeys(const Uint8* keys) :
         up(keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]),
         down(keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN]),
-        enter(keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE]),
+        enter(keys[SDL_SCANCODE_RETURN]),
         esc(keys[SDL_SCANCODE_ESCAPE] || keys[SDL_SCANCODE_BACKSPACE]) {}
 };
 
@@ -3613,9 +3635,13 @@ class Game {
     bool aimAssistOn;
     bool inNarration;
     bool ch1DialogueDone;
-    bool dTrig0, dTrig3, dTrig15, dTrig20;
+    bool dTrig0, dTrig3, dTrig15, dTrig20, dTrig30, dTrig40, dTrig50, dTrig61;
     int baseFireTimer;
     int lastScore;
+    int historyScroll;
+    int historyFocusSlot;
+    bool pauseHistoryFocused;
+    bool enemiesEnabled;
 
     // Screens
     bool atStartScreen, atTestSelect, atChapterSelect, atOptionScreen, atSoundMenu;
@@ -3670,7 +3696,7 @@ public:
         : renderer(r), audio(a),
           player(&trainingPlane), shakeTex(nullptr),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
-          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false), dTrig0(false), dTrig3(false), dTrig15(false), dTrig20(false), baseFireTimer(0), lastScore(-1),
+          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false), dTrig0(false), dTrig3(false), dTrig15(false), dTrig20(false), dTrig30(false), dTrig40(false), dTrig50(false), dTrig61(false), baseFireTimer(0), lastScore(-1), historyScroll(0), historyFocusSlot(2), pauseHistoryFocused(false), enemiesEnabled(false),
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
           atOptionScreen(false), atSoundMenu(false), optionFromPause(false), optionJustEntered(true),
           startMenuSelection(0), testScoreSelection(0), chapterSelection(0), menuSelection(0),
@@ -3724,7 +3750,7 @@ public:
         boss.reset();
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         floatingTextMgr.clear();
-        narration.reset(); inNarration = false; ch1DialogueDone = false; dTrig0 = false; dTrig3 = false; dTrig15 = false; dTrig20 = false; baseFireTimer = 0; lastScore = -1;
+        narration.reset(); inNarration = false; ch1DialogueDone = false; dTrig0 = false; dTrig3 = false; dTrig15 = false; dTrig20 = false; dTrig30 = false; dTrig40 = false; dTrig50 = false; dTrig61 = false; baseFireTimer = 0; lastScore = -1; historyScroll = 0; historyFocusSlot = 2; enemiesEnabled = false;
         phase = PHASE_PLAY;
         paused = false;
         missionComplete = false; missionCompleteShown = false;
@@ -3758,13 +3784,17 @@ public:
             if (sideBg) sideBg->update();
 
             // ======== Esc key global ========
-            if (escPressed && !inNarration && !gameOver && !atStartScreen && !atTestSelect && !atChapterSelect
+            if (escPressed && inNarration) {
+                // ESC skips entire opening narration
+                narration.reset(); inNarration = false;
+            } else if (escPressed && !inNarration && !gameOver && !atStartScreen && !atTestSelect && !atChapterSelect
                 && !atOptionScreen && !atSoundMenu && !missionComplete) {
                 if (paused && countdown == -1) {
                     countdown = 3; countdownFrame = 0;
                 } else {
                     paused = !paused;
                     pauseMenuSelection = 0;
+                    if (paused) { pauseHistoryFocused = false; historyScroll = 0; historyFocusSlot = 2; }
                 }
             }
 
@@ -3820,14 +3850,14 @@ private:
         static bool sJustEntered = true;
         bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
         bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+        bool enterNow = keys[SDL_SCANCODE_RETURN];
 
         if (sJustEntered) {
             upWas = upNow; downWas = downNow; enterWas = enterNow;
             sJustEntered = false;
         }
-        if (upNow && !upWas)     startMenuSelection = (startMenuSelection - 1 + 5) % 5;
-        if (downNow && !downWas) startMenuSelection = (startMenuSelection + 1) % 5;
+        if (upNow && !upWas && startMenuSelection > 0)     startMenuSelection--;
+        if (downNow && !downWas && startMenuSelection < 4) startMenuSelection++;
         if (enterNow && !enterWas) {
             if (startMenuSelection == 0) {
                 resetGame(); atStartScreen = false;
@@ -3878,7 +3908,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.12", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.13", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -3886,8 +3916,8 @@ private:
         static bool cJustEntered = true;
         MenuKeys mk(keys);
         if (cJustEntered) { upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc; cJustEntered=false; }
-        if (mk.up && !upWas)    { do { chapterSelection = (chapterSelection - 1 + 5) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
-        if (mk.down && !downWas) { do { chapterSelection = (chapterSelection + 1) % 5; } while (!chapterMgr.isUnlocked(chapterSelection)); }
+        if (mk.up && !upWas)    { int cs = chapterSelection; while (cs > 0) { cs--; if (chapterMgr.isUnlocked(cs)) { chapterSelection = cs; break; } } }
+        if (mk.down && !downWas) { int cs = chapterSelection; while (cs < 4) { cs++; if (chapterMgr.isUnlocked(cs)) { chapterSelection = cs; break; } } }
         if (mk.enter && !enterWas) {
             if (chapterMgr.isUnlocked(chapterSelection)) {
                 chapterMgr.selectChapter(chapterSelection);
@@ -3936,8 +3966,8 @@ private:
         if (testAtChapterSelect) {
             // Level 1: Chapter selection
             if (mk.esc && !escWas) { atTestSelect = false; atStartScreen = true; tJustEntered = true; }
-            if (mk.up && !upWas)       testChapterSelection = (testChapterSelection - 1 + 5) % 5;
-            if (mk.down && !downWas)   testChapterSelection = (testChapterSelection + 1) % 5;
+            if (mk.up && !upWas && testChapterSelection > 0)       testChapterSelection--;
+            if (mk.down && !downWas && testChapterSelection < 4)   testChapterSelection++;
             if (mk.enter && !enterWas) {
                 if (testChapterSelection == 0) { chapterMgr.selectChapter(0); testAtChapterSelect = false; tJustEntered = true; }
                 else if (testChapterSelection == 1) {
@@ -3955,8 +3985,8 @@ private:
         } else {
             // Level 2: Score/target selection for selected chapter
             if (mk.esc && !escWas) { testAtChapterSelect = true; tJustEntered = true; }
-            if (mk.up && !upWas)     testScoreSelection = (testScoreSelection - 1 + 9) % 9;
-            if (mk.down && !downWas) testScoreSelection = (testScoreSelection + 1) % 9;
+            if (mk.up && !upWas && testScoreSelection > 0)     testScoreSelection--;
+            if (mk.down && !downWas && testScoreSelection < 9) testScoreSelection++;
         if (mk.enter && !enterWas) {
             int savedSel = testScoreSelection;
             resetGame();
@@ -3966,15 +3996,18 @@ private:
             alienMgr.applyChapterConfig(chapterMgr.getConfig());
             bulletMgr.updateParams(0);
             shockwaveMgr.updateParams(0);
-            const int testScores[6] = {30, 60, 90, 120, 150, 180};
-            if (savedSel < 6) {
+            const int testScores[7] = {0, 30, 60, 90, 120, 150, 180};
+            if (savedSel < 7) {
                 score = testScores[savedSel];
                 shockwaveMgr.setPending(true);
                 bulletMgr.updateParams(score / 30);
                 shockwaveMgr.updateParams(score / 30);
-            } else if (savedSel == 6) {
+                // Score 0: use opening delay like normal play
+                if (score == 0) { lastScore = -1; }
+                else { lastScore = score; enemiesEnabled = true; }
+            } else if (savedSel == 7) {
                 // 200 BOSS: 直接进入Boss登场动画
-                score = 200;
+                score = 200; enemiesEnabled = true;
                 bulletMgr.updateParams(score / 30);
                 shockwaveMgr.updateParams(score / 30);
                 boss.trigger();
@@ -3993,9 +4026,9 @@ private:
                     a.active = true;
                     alienMgr.pushAlien(a);
                 }
-            } else if (savedSel == 7) {
+            } else if (savedSel == 8) {
                 // BOSS PH.2: 直接进入Boss二阶段
-                score = 200;
+                score = 200; enemiesEnabled = true;
                 bulletMgr.updateParams(score / 30);
                 shockwaveMgr.updateParams(score / 30);
                 boss.setY(90);
@@ -4022,7 +4055,7 @@ private:
                 }
             } else {
                 // BOSS 1HP: 快速检验战败流程
-                score = 200;
+                score = 200; enemiesEnabled = true;
                 bulletMgr.updateParams(score / 30);
                 shockwaveMgr.updateParams(score / 30);
                 boss.setY(90);
@@ -4073,9 +4106,9 @@ private:
             font.drawString(r, "TEST - CHAPTER 1", CENTER_X - 192, 50, 4);
             SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
             SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
-            const char* testLabels[9] = {"30", "60", "90", "120", "150", "180", "200 BOSS", "BOSS PH.2", "BOSS 1HP"};
+            const char* testLabels[10] = {"0", "30", "60", "90", "120", "150", "180", "200 BOSS", "BOSS PH.2", "BOSS 1HP"};
             const int MENU_Y0 = 130, GAP = 48;
-            for (int i = 0; i < 9; ++i) {
+            for (int i = 0; i < 10; ++i) {
                 int itemW = (int)strlen(testLabels[i]) * 6 * 3;
                 int itemX = CENTER_X - itemW / 2;
                 int itemY = MENU_Y0 + i * GAP;
@@ -4094,8 +4127,8 @@ private:
         static bool oJustEntered = true;
         MenuKeys mk(keys);
         if (oJustEntered) { upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc; oJustEntered=false; }
-        if (mk.up && !upWas)    optionCursor = (optionCursor - 1 + 2) % 2;
-        if (mk.down && !downWas) optionCursor = (optionCursor + 1) % 2;
+        if (mk.up && !upWas && optionCursor > 0)    optionCursor--;
+        if (mk.down && !downWas && optionCursor < 1) optionCursor++;
         if (mk.enter && !enterWas) {
             if (optionCursor == 0) aimAssistOn = !aimAssistOn;
             else if (optionCursor == 1) { atSoundMenu = true; oJustEntered = true; }
@@ -4148,8 +4181,8 @@ private:
             upWas=mk.up; downWas=mk.down; escWas=mk.esc; enterWas=mk.enter;
             leftWas=leftNow; rightWas=rightNow; sJustEntered=false;
         }
-        if (mk.up && !upWas)    soundCursor = (soundCursor - 1 + 6) % 6;
-        if (mk.down && !downWas) soundCursor = (soundCursor + 1) % 6;
+        if (mk.up && !upWas && soundCursor > 0)    soundCursor--;
+        if (mk.down && !downWas && soundCursor < 5) soundCursor++;
         if (mk.esc && !escWas)  { atSoundMenu = false; sJustEntered = true; }
         if (mk.enter && !enterWas && soundCursor == 5) { atSoundMenu = false; sJustEntered = true; }
 
@@ -4292,8 +4325,14 @@ private:
             }
             bulletMgr.decrementCooldown();
 
+            // Enable enemies after score-0 dialogue finishes
+            if (!enemiesEnabled && dTrig0 && !narration.isDialogueActive())
+                enemiesEnabled = true;
+
             // Spawn
-            if (phase == PHASE_BOSS_FIGHT && boss.isActive()) {
+            if (!enemiesEnabled) {
+                if (phase == PHASE_PLAY) alienMgr.spawnTimerRef()--;
+            } else if (phase == PHASE_BOSS_FIGHT && boss.isActive()) {
                 if (alienMgr.spawnTimerRef() <= 0) {
                     alienMgr.spawnAlienFromBoss(boss.getX(), boss.getY(), score);
                     alienMgr.spawnTimerRef() = alienMgr.currentSpawnInterval(score, difficultyTimer) + (rand() % 20);
@@ -4349,30 +4388,53 @@ private:
             floatingTextMgr.update();
             if (!dTrig0 && lastScore < 0 && score >= 0 && !narration.isDialogueActive()) {
                 dTrig0 = true;
-                narration.queueDialogue("Ally", "Martha, you're the only one who made it up.");
-                narration.queueDialogue("Ally", "Hold on. Base defenses are powering up.");
+                narration.queueDialogue("Ally", "Martha, you're the only one in the air.");
+                narration.queueDialogue("Ally", "Hold on as long as you can. The base shockwave cannon is charging.");
                 narration.startDialogue();
             }
             if (!dTrig3 && lastScore < 3 && score >= 3 && !narration.isDialogueActive()) {
                 dTrig3 = true;
-                narration.queueDialogue("Ally", "These enemies are made of pure energy.");
-                narration.queueDialogue("Ally", "Shoot them down -- we can harvest it.");
+                narration.queueDialogue("Bryssa", "These enemies are made of energy. Destroy them. We can collect the energy.");
                 narration.startDialogue();
             }
             if (!dTrig15 && lastScore < 15 && score >= 15 && !narration.isDialogueActive()) {
                 dTrig15 = true;
-                narration.queueDialogue("Tower", "Tower communication restored.");
+                narration.queueDialogue("", "Tower communication restored.");
                 narration.startDialogue();
             }
             if (!dTrig20 && lastScore < 20 && score >= 20 && !narration.isDialogueActive()) {
                 dTrig20 = true;
-                narration.queueDialogue("Tower", "Defense batteries are ready.");
-                narration.queueDialogue("Tower", "Just need a little more energy!");
+                narration.queueDialogue("Tower", "Shockwave cannon ready.");
+                narration.queueDialogue("Tower", "Just a little more energy!");
+                narration.startDialogue();
+            }
+            if (!dTrig30 && lastScore < 30 && score >= 30 && !narration.isDialogueActive()) {
+                dTrig30 = true;
+                narration.queueDialogue("Tower", "Defense system charged.");
+                narration.queueDialogue("Tower", "More enemies incoming. Keep gathering energy.");
+                narration.startDialogue();
+            }
+            if (!dTrig40 && lastScore < 40 && score >= 40 && !narration.isDialogueActive()) {
+                dTrig40 = true;
+                narration.queueDialogue("Ally", "Stay strong, Martha!");
+                narration.queueDialogue("Bryssa", "The trainer shares energy with the base.");
+                narration.queueDialogue("Bryssa", "You and the base will upgrade together.");
+                narration.startDialogue();
+            }
+            if (!dTrig50 && lastScore < 50 && score >= 50 && !narration.isDialogueActive()) {
+                dTrig50 = true;
+                narration.queueDialogue("Tower", "Keep gathering energy.");
+                narration.queueDialogue("Ally", "We believe in you.");
+                narration.startDialogue();
+            }
+            if (!dTrig61 && lastScore < 61 && score >= 61 && !narration.isDialogueActive()) {
+                dTrig61 = true;
+                narration.queueDialogue("Tower", "Base upgraded again.");
+                narration.queueDialogue("Tower", "Radar shows even more enemies.");
                 narration.startDialogue();
             }
             lastScore = score;
-            bool dEnter = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
-            narration.updateDialogue(dEnter);
+            narration.updateDialogue(false);  // no ENTER skip for dialogue
             int ticks = narration.popTicks();
             while (ticks-- > 0) audio.sndTeletype();
 
@@ -4618,7 +4680,7 @@ private:
         }
 
         if (missionComplete) {
-            bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+            bool enterNow = keys[SDL_SCANCODE_RETURN];
             static bool enterWasM = false;
             if (enterNow && !enterWasM) {
                 resetGame(); atStartScreen = true;
@@ -4940,40 +5002,160 @@ private:
                 }
             }
         } else {
-            static bool pUpWas = false, pDownWas = false, pEnterWas = false;
+            static bool pUpWas = false, pDownWas = false, pEnterWas = false, pLeftWas = false, pRightWas = false;
             bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
             bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
-            bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
-            if (upNow && !pUpWas)     pauseMenuSelection = (pauseMenuSelection - 1 + 5) % 5;
-            if (downNow && !pDownWas) pauseMenuSelection = (pauseMenuSelection + 1) % 5;
-            if (enterNow && !pEnterWas) {
-                if (pauseMenuSelection == 0)      { countdown = 3; countdownFrame = 0; }
-                else if (pauseMenuSelection == 1) { resetGame(); paused = false; }
-                else if (pauseMenuSelection == 2) { paused = false; atOptionScreen = true; optionFromPause = true; }
-                else if (pauseMenuSelection == 3) { resetGame(); atStartScreen = true; paused = false; }
-                else                              running = false;
+            bool leftNow = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
+            bool rightNow = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
+            bool enterNow = keys[SDL_SCANCODE_RETURN];
+
+            // Left/Right: switch focus between menu and history
+            if (leftNow && !pLeftWas)  pauseHistoryFocused = false;
+            if (rightNow && !pRightWas) pauseHistoryFocused = true;
+
+            if (!pauseHistoryFocused) {
+                // Menu focused
+                if (upNow && !pUpWas && pauseMenuSelection > 0)     pauseMenuSelection--;
+                if (downNow && !pDownWas && pauseMenuSelection < 4) pauseMenuSelection++;
+                if (enterNow && !pEnterWas) {
+                    if (pauseMenuSelection == 0)      { countdown = 3; countdownFrame = 0; }
+                    else if (pauseMenuSelection == 1) { resetGame(); paused = false; }
+                    else if (pauseMenuSelection == 2) { paused = false; atOptionScreen = true; optionFromPause = true; }
+                    else if (pauseMenuSelection == 3) { resetGame(); atStartScreen = true; paused = false; }
+                    else                              running = false;
+                }
+            } else {
+                // History focused: focus moves, then scrolls at boundaries
+                int total = (int)narration.getHistory().size();
+                if (total > 0) {
+                    int maxSlot = (total >= 3) ? 2 : total - 1;
+                    if (historyFocusSlot > maxSlot) historyFocusSlot = maxSlot;
+                    int bottomIdx = total - 1 - historyScroll;
+                    if (bottomIdx < 0) { bottomIdx = 0; historyScroll = total - 1; }
+
+                    bool canScrollOlder = (bottomIdx > maxSlot);
+                    bool canScrollNewer = (historyScroll > 0);
+
+                    if (upNow && !pUpWas) {
+                        if (historyFocusSlot > 0) historyFocusSlot--;
+                        else if (canScrollOlder) historyScroll++;
+                    }
+                    if (downNow && !pDownWas) {
+                        if (historyFocusSlot < maxSlot) historyFocusSlot++;
+                        else if (canScrollNewer) historyScroll--;
+                    }
+                }
             }
             pUpWas = upNow; pDownWas = downNow; pEnterWas = enterNow;
+            pLeftWas = leftNow; pRightWas = rightNow;
         }
     }
 
     void drawPauseMenu() {
         SDL_Renderer* r = renderer.get();
         UIRenderer::drawHalfTransparentOverlay(r, 180);
-        font.drawString(r, "PAUSED", CENTER_X - 72, 150, 3);
+
+        // === Left half: menu ===
+        bool menuFocus = !pauseHistoryFocused;
+        font.drawString(r, "PAUSED", 50, 100, 3);
         const char* items[5] = {"RESUME", "RESTART", "OPTIONS", "BACK TO MAIN MENU", "EXIT"};
-        const int MENU_Y0 = 210, GAP = 45;
+        const int MENU_Y0 = 160, GAP = 40;
         for (int i = 0; i < 5; ++i) {
             int itemW = (int)strlen(items[i]) * 6 * 3;
-            int itemX = CENTER_X - itemW / 2;
+            int itemX = 50;
             int itemY = MENU_Y0 + i * GAP;
             font.drawString(r, items[i], itemX, itemY, 3);
-            if (i == pauseMenuSelection) {
+            if (menuFocus && i == pauseMenuSelection) {
                 UIRenderer::drawMenuCursor(r, itemX - 20, itemY + 10, 8);
                 UIRenderer::drawMenuUnderline(r, itemX, itemY + 24, itemW);
             }
         }
-        font.drawString(r, "W/S:select  ENTER:confirm  ESC:resume", CENTER_X - 228, 490, 2);
+        font.drawString(r, "A/D:switch  W/S:menu  ENTER:confirm", 30, 480, 2);
+
+        // === Right half: dialogue history ===
+        auto& hist = narration.getHistory();
+        int total = (int)hist.size();
+        if (total == 0) return;
+
+        const int CH_W = 12, CH_H = 14;
+        const int RX = 420, RY_TOP = 160;
+        const int LINE_GAP = 14;  // one blank line between blocks
+        const int TR = 50, TG = 155, TB = 70;
+        const int SR = 180, SG = 200, SB = 160;
+
+        int bottomIdx = total - 1 - historyScroll;
+        if (bottomIdx < 0) { bottomIdx = 0; historyScroll = total - 1; }
+        int maxSlot = (total >= 3) ? 2 : total - 1;
+        int fSlot = historyFocusSlot;
+        if (fSlot > maxSlot) fSlot = maxSlot;
+
+        // Draw items top to bottom with LINE_GAP between
+        const int HIST_WRAP = 30;
+        int curY = RY_TOP;
+        for (int s = 0; s <= maxSlot; ++s) {
+            int idx = bottomIdx - (maxSlot - s);
+            if (idx < 0 || idx >= total) continue;
+            auto& hl = hist[idx];
+
+            // Opacity based on distance from focus
+            int dist = (s > fSlot) ? s - fSlot : fSlot - s;
+            int alpha = 100;
+            if (dist == 1) alpha = 50;
+            else if (dist >= 2) alpha = 30;
+            if (!pauseHistoryFocused) alpha = 30;
+
+            int rr = (int)(TR * alpha / 100.0);
+            int gg = (int)(TG * alpha / 100.0);
+            int bb = (int)(TB * alpha / 100.0);
+            int sr2 = (int)(SR * alpha / 100.0);
+            int sg2 = (int)(SG * alpha / 100.0);
+            int sb2 = (int)(SB * alpha / 100.0);
+
+            // Re-wrap lines for narrow history panel
+            std::vector<std::string> wlines;
+            for (auto& line : hl.lines) {
+                std::string s = line;
+                while ((int)s.length() > HIST_WRAP) {
+                    int brk = HIST_WRAP;
+                    while (brk > 0 && s[brk] != ' ') brk--;
+                    if (brk == 0) brk = HIST_WRAP;
+                    wlines.push_back(s.substr(0, brk));
+                    s = s.substr(brk + 1);
+                }
+                if (!s.empty()) wlines.push_back(s);
+            }
+            int wNum = (int)wlines.size();
+            int itemH = wNum * CH_H + (wNum - 1) * 4;
+            int speakerOff = 0;
+            if (!hl.speaker.empty()) { speakerOff = CH_H + 2; itemH += speakerOff; }
+
+            int itemY = curY;
+
+            // Speaker
+            if (!hl.speaker.empty()) {
+                SDL_SetRenderDrawColor(r, (Uint8)sr2, (Uint8)sg2, (Uint8)sb2, 255);
+                int tx = RX, ty = itemY;
+                for (char c : hl.speaker) {
+                    if (c == ' ') { tx += CH_W; continue; }
+                    font.drawChar(r, c, tx, ty, 1, 2);
+                    tx += CH_W;
+                }
+                itemY += CH_H + 2;
+            }
+            // Content
+            SDL_SetRenderDrawColor(r, (Uint8)rr, (Uint8)gg, (Uint8)bb, 255);
+            for (int li = 0; li < wNum; ++li) {
+                auto& line = wlines[li];
+                int tx = RX;
+                int ty = itemY + li * (CH_H + 4);
+                for (char c : line) {
+                    if (c == ' ') { tx += CH_W; continue; }
+                    font.drawChar(r, c, tx, ty, 1, 2);
+                    tx += CH_W;
+                }
+            }
+            curY += itemH + LINE_GAP;
+        }
     }
 
     void drawCountdown() {
@@ -5006,8 +5188,8 @@ private:
         bool upNow2 = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
         bool downNow2 = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
         bool enterNow2 = keys[SDL_SCANCODE_RETURN];
-        if (upNow2 && !upWas2)   menuSelection = (menuSelection - 1 + 2) % 2;
-        if (downNow2 && !downWas2) menuSelection = (menuSelection + 1) % 2;
+        if (upNow2 && !upWas2 && menuSelection > 0)   menuSelection--;
+        if (downNow2 && !downWas2 && menuSelection < 1) menuSelection++;
         if (enterNow2 && !enterWas2) {
             if (menuSelection == 0) {
                 // PLAY AGAIN: restart current chapter
@@ -5053,7 +5235,7 @@ private:
 
     // ======== MISSION COMPLETE ========
     void updateMissionComplete(const Uint8* keys) {
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+        bool enterNow = keys[SDL_SCANCODE_RETURN];
         static bool entWas = false;
         if (enterNow && !entWas) { resetGame(); atStartScreen = true; }
         entWas = enterNow;
@@ -5093,14 +5275,15 @@ private:
             case 0:
                 narration.queue("Stellar Calendar 24th\nIn the deep space.\nThe \"Life\" base.");
                 narration.queue("Martha aces her final test.\nShe's now a \"Huntress\".");
-                narration.queue("Off the plane.\nHeading for the rest area.");
-                narration.queue("A series of massive explosions behind her.\nShe turns --");
-                narration.queue("All main fighters. Wreckage.");
-                narration.queue("Tower: \"Unknown objects approaching!\nAll fighters scramble!\"");
+                narration.queue("When she is just off the plane.\nHeading for the rest area.\nAnnouncement sounds.");
+                narration.queue("Tower: \"Hostile objects approaching!\nAll fighters scramble!\"");
+                narration.queue("\"Repeat: Scramble! Scramble!\"");
+                narration.queue("At the same moment,\na series of massive explosions behind her.\nShe turns --");
+                narration.queue("All fighters become wreckage.");
                 narration.queue("Martha runs back to the hangar.\nOnly one old trainer left.");
-                narration.queue("Into the cockpit. Engines up. \nShe reports:\"I'm taking off.\"");
-                narration.queue("No answer from the tower.");
-                narration.queue("Only a sharp, harsh noise.");
+                narration.queue("Into the cockpit. Engines up.\nShe reports:\n\"I'm taking off. Flight code:B295\"");
+                narration.queue("Martha heads into space.");
+                narration.queue("No answer from the tower.\nOnly a sharp, harsh noise.");
                 break;
             case 1:
                 narration.queue("CH.2  DEEP SPACE");
@@ -5128,7 +5311,7 @@ private:
     }
 
     void updateNarration(const Uint8* keys) {
-        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+        bool enterNow = keys[SDL_SCANCODE_RETURN];
         narration.update(enterNow);
         int cticks = narration.popCTicks();
         while (cticks-- > 0) audio.sndTeletype();

@@ -18,7 +18,9 @@ Control your starfighter in a massive space, shoot down alien ships, survive wav
 
 > macOS 11.0+
 
-[Download v1.2.10](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.10) (latest)
+[Download v1.2.11](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.11) (latest)
+
+[Download v1.2.10](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.10)
 
 [Download v1.2.9](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.9)
 
@@ -38,12 +40,11 @@ Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.10)
+## What's New / 最近更新 (v1.2.11)
 
-- **敌人互斥系统** — 弹幕敌人不再挤在一起，垂直分散出场，入场位置自动检测间距，振荡节奏各不相同。
-- **碰撞逻辑优化** — 玩家同一帧只扣一滴血，NightElf 机头不再穿透隐形墙，受击反馈更公平。
-- **一堆 Bug 修复** — 心心不减少、瞄准辅助遗漏弹幕敌人、倒计时粒子错位、测试模式飞机错乱、暂停菜单闪烁，全修了。
-- **代码质量** — 消除全部编译器警告，重构重复代码，Game Over 界面优化。
+- **旁白 & 对话系统** — 章节开场剧情旁白（打字机+Mario弹出特效），游戏内队友对话（左侧弹出+自动消失），电报音效。
+- **字体增强** — 新增逗号、引号、问号等24个标点符号，字体支持任意倍数缩放。
+- **星空全屏** — 菜单和旁白界面星空布满整个画面。
 
 ## Build from Source / 从源码编译
 
@@ -75,7 +76,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.7.app/ + .zip                   # v1.2.7
         ├── Shooter ver1.2.8.app/ + .zip                   # v1.2.8
         ├── Shooter ver1.2.9.app/ + .zip                   # v1.2.9
-        └── Shooter ver1.2.10.app/ + .zip                  # v1.2.10 (最新)
+        ├── Shooter ver1.2.10.app/ + .zip                  # v1.2.10
+        └── Shooter ver1.2.11.app/ + .zip                  # v1.2.11 (最新)
 ```
 
 ## License

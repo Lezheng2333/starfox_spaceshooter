@@ -250,34 +250,74 @@ public:
         setChar('z', "\x00\x00\x1F\x02\x04\x08\x1F");
         setChar(' ', "\x00\x00\x00\x00\x00\x00\x00");
         setChar('!', "\x04\x04\x04\x04\x00\x00\x04");
+        setChar('"', "\x15\x15\x00\x00\x00\x00\x00");
+        setChar('#', "\x0A\x0A\x1F\x0A\x1F\x0A\x0A");
+        setChar('$', "\x04\x1E\x14\x0E\x05\x1E\x04");
+        setChar('%', "\x11\x01\x02\x04\x08\x10\x11");
+        setChar('&', "\x0C\x12\x14\x0C\x15\x12\x0D");
+        setChar('\'', "\x04\x04\x00\x00\x00\x00\x00");
+        setChar('(', "\x04\x08\x08\x08\x08\x08\x04");
+        setChar(')', "\x04\x02\x02\x02\x02\x02\x04");
         setChar('*', "\x00\x0A\x1F\x1F\x0E\x04\x00");
         setChar('+', "\x00\x00\x04\x0E\x04\x00\x00");
+        setChar(',', "\x00\x00\x00\x00\x00\x06\x0C");
         setChar('-', "\x00\x00\x00\x1F\x00\x00\x00");
+        setChar('.', "\x00\x00\x00\x00\x00\x00\x04");
         setChar('/', "\x01\x02\x02\x04\x08\x08\x10");
         setChar(':', "\x00\x00\x04\x00\x00\x04\x00");
-        setChar('.', "\x00\x00\x00\x00\x00\x00\x04");
+        setChar(';', "\x04\x00\x00\x00\x00\x06\x0C");
+        setChar('<', "\x00\x02\x04\x08\x04\x02\x00");
+        setChar('=', "\x00\x1F\x00\x1F\x00\x00\x00");
+        setChar('>', "\x00\x08\x04\x02\x04\x08\x00");
+        setChar('?', "\x0E\x11\x01\x02\x04\x00\x04");
+        setChar('@', "\x0E\x11\x17\x15\x16\x10\x0E");
+        setChar('[', "\x0E\x08\x08\x08\x08\x08\x0E");
+        setChar('\\',"\x10\x08\x04\x02\x01\x00\x00");
+        setChar(']', "\x0E\x02\x02\x02\x02\x02\x0E");
+        setChar('^', "\x04\x0A\x11\x00\x00\x00\x00");
+        setChar('_', "\x00\x00\x00\x00\x00\x00\x1F");
+        setChar('`', "\x08\x04\x00\x00\x00\x00\x00");
+        setChar('{', "\x03\x04\x04\x0C\x04\x04\x03");
+        setChar('|', "\x04\x04\x04\x04\x04\x04\x04");
+        setChar('}', "\x18\x04\x04\x06\x04\x04\x18");
+        setChar('~', "\x00\x0A\x15\x00\x00\x00\x00");
     }
 
-    void drawChar(SDL_Renderer* renderer, char c, int x, int y, int scale) const {
+    void drawChar(SDL_Renderer* renderer, char c, int x, int y, int scale, int mul=1) const {
         const FontChar& fc = chars[(int)c];
+        int s = scale * mul;
         for (int row = 0; row < 7; ++row) {
             unsigned char bits = fc.rows[row];
             for (int col = 0; col < 5; ++col) {
                 if (bits & (1 << (4 - col))) {
-                    SDL_Rect r = {x + col * scale, y + row * scale, scale, scale};
-                    SDL_RenderFillRect(renderer, &r);
+                    SDL_Rect r2 = {x + col * s, y + row * s, s, s};
+                    SDL_RenderFillRect(renderer, &r2);
                 }
             }
         }
     }
 
-    void drawString(SDL_Renderer* renderer, const char* str, int x, int y, int scale) const {
+    void drawString(SDL_Renderer* renderer, const char* str, int x, int y, int scale, int mul=1) const {
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         int cx = x;
+        int step = 6 * scale * mul;
         for (const char* p = str; *p; ++p) {
-            if (*p == ' ') { cx += 6 * scale; continue; }
-            drawChar(renderer, *p, cx, y, scale);
-            cx += 6 * scale;
+            if (*p == ' ') { cx += step; continue; }
+            drawChar(renderer, *p, cx, y, scale, mul);
+            cx += step;
+        }
+    }
+
+    void drawCharFloat(SDL_Renderer* r, char c, float x, float y, float scale) const {
+        const FontChar& fc = chars[(int)c];
+        for (int row = 0; row < 7; ++row) {
+            unsigned char bits = fc.rows[row];
+            for (int col = 0; col < 5; ++col) {
+                if (bits & (1 << (4 - col))) {
+                    SDL_FRect fr = {x + col * scale, y + row * scale, scale, scale};
+                    SDL_RenderFillRectF(r, &fr);
+                }
+            }
         }
     }
 
@@ -558,6 +598,11 @@ public:
         playSound(800, 0, 18, 0.12f, 3, 2);      // noise crunch: impact texture
         playSound(3600, 1200, 10, 0.06f, 0, 2);  // sine sparkle: bright glass top
     }
+    void sndVillainTalk() {
+        playSound(3500, 2400, 16, 0.09f, 3, 2);  // high sweep: radar chirp
+        playSound(500, 0, 12, 0.05f, 0, 1);       // low sine body: radio depth
+    }
+    void sndTeletype()  { playSound(2400, 1800, 20, 0.10f, 3, 2); }
     void sndPlayerHit() { // heavy damage impact
         playSound(80, 0, 55, 0.22f, 2, 0);    // low thud
         playSound(200, 0, 40, 0.16f, 1, 1);   // mid impact
@@ -672,6 +717,314 @@ public:
 
     const std::vector<FloatingText>& all() const { return texts; }
     std::vector<FloatingText>& all() { return texts; }
+};
+
+
+// ============== NarrationSystem ==============
+// Night Elf dark green color scheme
+// Center narration: chapter intro/outro, blocking (gameplay paused)
+// Left dialogue: in-game teammate hints, non-blocking (future use)
+class NarrationSystem {
+public:
+    struct Line {
+        std::string text;
+        int revealed;       // chars shown so far (typewriter)
+        int popupTimer;     // 0→POPUP_FRAMES, Mario pop-in animation
+        int typeTimer;      // frames since last char reveal
+        bool isDialogue;    // true = left-side dialogue, false = center narration
+    };
+
+private:
+    std::vector<Line> lines;
+    int curLine;
+    bool active;
+    int bgAlpha;
+    int bgTimer;
+    bool enterWas;
+
+    static const int POPUP_FRAMES = 18;
+    static const int TYPE_SPEED = 2;  // 1 char every N frames (~30 chars/sec at 60fps)
+
+    static double marioEase(double t) {
+        if (t >= 1.0) return 1.0;
+        if (t <= 0.0) return 0.0;
+        const double c1 = 1.70158;
+        const double c3 = c1 + 1.0;
+        return 1.0 + c3 * std::pow(t - 1.0, 3) + c1 * std::pow(t - 1.0, 2);
+    }
+
+public:
+    NarrationSystem() : curLine(0), active(false), bgAlpha(0), bgTimer(0), enterWas(false),
+          dIdx(0), dActive(false), dEnterWas(false), dTicks(0) {}
+
+    // === Center narration (blocking, manual advance) ===
+    void queue(const char* text) {
+        Line l;
+        l.text = text;
+        l.revealed = 0;
+        l.popupTimer = 0;
+        l.typeTimer = 0;
+        l.isDialogue = false;
+        lines.push_back(l);
+    }
+
+    void start() {
+        if (lines.empty()) return;
+        curLine = 0;
+        active = true;
+        bgAlpha = 0;
+        bgTimer = 0;
+        enterWas = true;
+        for (auto& l : lines) {
+            l.revealed = 0;
+            l.popupTimer = 0;
+            l.typeTimer = 0;
+        }
+    }
+
+    bool isActive() const { return active; }
+
+    void reset() {
+        lines.clear();
+        curLine = 0;
+        active = false;
+        bgAlpha = 0;
+        bgTimer = 0;
+        enterWas = false;
+        dQueue.clear();
+        dIdx = 0; dActive = false; dEnterWas = false; dTicks = 0;
+    }
+
+    void update(bool enterPressed) {
+        if (!active || lines.empty()) {
+            if (bgAlpha > 0) { bgTimer++; if (bgTimer >= 3) { bgAlpha -= 4; bgTimer = 0; } }
+            return;
+        }
+        if (bgAlpha < 180) { bgTimer++; if (bgTimer >= 2) { bgAlpha += 4; bgTimer = 0; } }
+
+        auto& cur = lines[curLine];
+
+        // Phase 1: Mario pop-in
+        if (cur.popupTimer < POPUP_FRAMES) {
+            cur.popupTimer++;
+            return;
+        }
+
+        // Phase 2: Typewriter
+        int fullLen = (int)cur.text.length();
+        if (cur.revealed < fullLen) {
+            cur.typeTimer++;
+            if (cur.typeTimer >= TYPE_SPEED) {
+                cur.typeTimer = 0;
+                cur.revealed++;
+            }
+            if (enterPressed && !enterWas) cur.revealed = fullLen;
+            enterWas = enterPressed;
+            return;
+        }
+
+        // Phase 3: ENTER to advance
+        if (enterPressed && !enterWas) {
+            curLine++;
+            if (curLine >= (int)lines.size()) active = false;
+        }
+        enterWas = enterPressed;
+    }
+
+    void draw(SDL_Renderer* r, const Font& font) {
+        if (!active && bgAlpha <= 0) return;
+        if (lines.empty() || curLine >= (int)lines.size()) return;
+
+        auto& cur = lines[curLine];
+        int textLen = (int)cur.text.length();
+        int revealed = cur.revealed;
+        int textScale = cur.isDialogue ? 2 : 3;
+        int charW = 6 * textScale;
+        int charH = 7 * textScale;
+
+        double popT = (double)cur.popupTimer / POPUP_FRAMES;
+        double popScale = marioEase(popT);
+
+        int boxW, boxH, boxX, boxY;
+        boxW = textLen * charW + 60;
+        boxH = charH + 48;
+        boxX = CENTER_X - boxW / 2;
+        boxY = WIN_HEIGHT / 2 - boxH / 2;
+
+        int drawW = (int)(boxW * popScale);
+        int drawH = (int)(boxH * popScale);
+        int drawX = boxX + (boxW - drawW) / 2;
+        int drawY = boxY + (boxH - drawH) / 2;
+        if (drawW < 10 || drawH < 10) return;
+
+        const int TR = 50, TG = 155, TB = 70;
+        Uint8 ba = (Uint8)(bgAlpha);
+
+        SDL_SetRenderDrawColor(r, 10, 25, 15, (Uint8)(ba * 0.85));
+        SDL_Rect bgRect = {drawX, drawY, drawW, drawH};
+        SDL_RenderFillRect(r, &bgRect);
+
+        SDL_SetRenderDrawColor(r, TR, TG, TB, (Uint8)(ba * 0.7));
+        SDL_RenderDrawRect(r, &bgRect);
+
+        if (cur.popupTimer < POPUP_FRAMES) return;
+
+        SDL_SetRenderDrawColor(r, TR, TG, TB, 255);
+        int tx = drawX + 25, ty = drawY + 22;
+        for (int i = 0; i < revealed; ++i) {
+            if (cur.text[i] == ' ') { tx += charW; continue; }
+            font.drawChar(r, cur.text[i], tx, ty, textScale);
+            tx += charW;
+        }
+    }
+
+    // === Dialogue (non-blocking, auto-dismiss, left-center) ===
+    void queueDialogue(const char* text) {
+        DLine dl;
+        dl.text = text;
+        dl.state = 0; dl.timer = 0; dl.revealed = 0; dl.typeTimer = 0;
+        dl.y = 200.0f; dl.fadeStartY = 0;
+        // Wrap into visual lines
+        std::string s(text);
+        while ((int)s.length() > D_WRAP) {
+            int brk = D_WRAP;
+            while (brk > 0 && s[brk] != ' ') brk--;
+            if (brk == 0) brk = D_WRAP;
+            dl.lines.push_back(s.substr(0, brk));
+            s = s.substr(brk + 1);
+        }
+        if (!s.empty()) dl.lines.push_back(s);
+        dl.numLines = (int)dl.lines.size();
+        dQueue.push_back(dl);
+    }
+
+    void startDialogue() {
+        if (dQueue.empty()) return;
+        dIdx = 0;
+        dQueue[dIdx].state = 1;
+        dQueue[dIdx].timer = 0;
+        dQueue[dIdx].revealed = 0;
+        dQueue[dIdx].typeTimer = 0;
+        dQueue[dIdx].y = 200.0f;
+        dActive = true;
+    }
+
+    bool isDialogueActive() const { return dActive; }
+
+    int popTicks() { int n = dTicks; dTicks = 0; return n; }
+
+    void updateDialogue(bool enterPressed) {
+        if (!dActive || dIdx >= (int)dQueue.size()) { dActive = false; return; }
+        auto& dl = dQueue[dIdx];
+
+        // ENTER/SPACE skips typewriter or dismisses current line
+        bool skip = enterPressed && !dEnterWas;
+
+        int totalChars = 0;
+        for (auto& l : dl.lines) totalChars += (int)l.length();
+
+        switch (dl.state) {
+            case 1: // Pop-in
+                dl.timer++;
+                if (skip || dl.timer >= D_POPUP) { dl.state = 2; dl.timer = 0; }
+                break;
+            case 2: // Typewriter
+                if (dl.revealed < totalChars) {
+                    if (skip) { dl.revealed = totalChars; }
+                    else { dl.typeTimer++; if (dl.typeTimer >= TYPE_SPEED) { dl.typeTimer = 0; dl.revealed++; dTicks++; } }
+                } else {
+                    dl.state = 3; dl.timer = 0;
+                }
+                break;
+            case 3: // Display (3.3s or manual dismiss)
+                dl.timer++;
+                if (skip || dl.timer >= 200) { dl.state = 4; dl.timer = 0; dl.fadeStartY = dl.y; }
+                break;
+            case 4: { // Fade out: float-up + dim
+                dl.timer++;
+                double t = (double)dl.timer / D_FADE;
+                double ease = 1.0 - std::pow(1.0 - t, 3.0);
+                dl.y = dl.fadeStartY - (float)(50.0 * ease);
+                if (skip || dl.timer >= D_FADE) {
+                    dIdx++;
+                    if (dIdx >= (int)dQueue.size()) { dActive = false; dEnterWas = enterPressed; return; }
+                    auto& next = dQueue[dIdx];
+                    next.state = 1; next.timer = 0; next.revealed = 0; next.typeTimer = 0;
+                    next.y = 200.0f;
+                }
+                break;
+            }
+        }
+        dEnterWas = enterPressed;
+    }
+
+    void drawDialogue(SDL_Renderer* r, const Font& font) {
+        if (!dActive || dIdx >= (int)dQueue.size()) return;
+        auto& dl = dQueue[dIdx];
+        if (dl.lines.empty()) return;
+
+        const int CH_W = 12, CH_H = 14;         // scale=1,mul=2
+        const int PAD_X = 14, PAD_Y = 10;
+        const int LINE_GAP = 4;
+
+        // Fade: dim RGB + float-up offset
+        double bright = 1.0;
+        int floatOff = 0;
+        if (dl.state == 4) {
+            double t = (double)dl.timer / D_FADE;
+            bright = 1.0 - t;
+            if (bright < 0.0) bright = 0.0;
+            double ease = 1.0 - std::pow(1.0 - t, 3.0);
+            floatOff = (int)(50.0 * ease);
+        }
+
+        int drawX = 18;
+        int drawY = (int)dl.y - floatOff;
+
+        if (dl.state == 1) return;
+
+        const int TR = 50, TG = 155, TB = 70;
+        int rr = (int)(TR * bright), gg = (int)(TG * bright), bb = (int)(TB * bright);
+
+        int charsLeft = dl.revealed;
+        SDL_SetRenderDrawColor(r, (Uint8)rr, (Uint8)gg, (Uint8)bb, 255);
+        for (int li = 0; li < dl.numLines && charsLeft > 0; ++li) {
+            auto& line = dl.lines[li];
+            int show = charsLeft;
+            if (show > (int)line.length()) show = (int)line.length();
+            int tx = drawX + PAD_X;
+            int ty = drawY + PAD_Y + li * (CH_H + LINE_GAP);
+            for (int i = 0; i < show; ++i) {
+                if (line[i] == ' ') { tx += CH_W; continue; }
+                font.drawChar(r, line[i], tx, ty, 1, 2);
+                tx += CH_W;
+            }
+            charsLeft -= show;
+        }
+    }
+
+private:
+    struct DLine {
+        std::string text;
+        std::vector<std::string> lines;
+        int numLines;
+        int state;       // 0=idle, 1=popin, 2=typewriter, 3=display, 4=fadeout
+        int timer;
+        int revealed;
+        int typeTimer;
+        float y;
+        float fadeStartY;
+    };
+
+    static const int D_POPUP = 15;
+    static const int D_FADE = 40;
+    static const int D_WRAP = 38;    // chars per line
+
+    std::vector<DLine> dQueue;
+    int dIdx;
+    bool dActive;
+    bool dEnterWas;
+    int dTicks;
 };
 
 
@@ -2089,6 +2442,30 @@ public:
         }
     }
 
+    void drawStarsFullscreen(SDL_Renderer* renderer) const {
+        float brightness = chapterCfg.starBrightness;
+        int hy = chapterCfg.horizonY;
+        // Sky portion: existing stars [0, hy)
+        for (const auto& s : stars) {
+            float bright = 0.45f + 0.55f * std::fabs(std::sin(s.phase));
+            int b = (int)(bright * 200 * brightness);
+            if (b < 60) b = 60;
+            SDL_SetRenderDrawColor(renderer, b, b, b, 255);
+            SDL_RenderDrawPoint(renderer, (int)s.x, (int)s.y);
+        }
+        // Ground portion: remap stars to [hy, WIN_HEIGHT]
+        float remap = (float)(WIN_HEIGHT - hy) / hy;
+        for (const auto& s : stars) {
+            float y2 = hy + s.y * remap;
+            if (y2 >= WIN_HEIGHT) continue;
+            float bright = 0.40f + 0.60f * std::fabs(std::sin(s.phase + 2.3f));
+            int b = (int)(bright * 200 * brightness);
+            if (b < 55) b = 55;
+            SDL_SetRenderDrawColor(renderer, b, b, b, 255);
+            SDL_RenderDrawPoint(renderer, (int)(s.x + s.driftSpeed * 300), (int)y2);
+        }
+    }
+
     void drawBackground(SDL_Renderer* renderer) const {
         int hy = chapterCfg.horizonY;
         // Ground
@@ -3145,6 +3522,7 @@ class Game {
     Ch1ShockwaveManager shockwaveMgr;
     Ch1Boss boss;
     FloatingTextManager floatingTextMgr;
+    NarrationSystem narration;
     ChapterManager chapterMgr;
 
     SDL_Texture* shakeTex;
@@ -3157,6 +3535,8 @@ class Game {
     bool paused;
     bool gameOver;
     bool aimAssistOn;
+    bool inNarration;
+    bool ch1DialogueDone;
 
     // Screens
     bool atStartScreen, atTestSelect, atChapterSelect, atOptionScreen, atSoundMenu;
@@ -3211,7 +3591,7 @@ public:
         : renderer(r), audio(a),
           player(&trainingPlane), shakeTex(nullptr),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
-          paused(false), gameOver(false), aimAssistOn(false),
+          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false),
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
           atOptionScreen(false), atSoundMenu(false), optionFromPause(false), optionJustEntered(true),
           startMenuSelection(0), testScoreSelection(0), chapterSelection(0), menuSelection(0),
@@ -3263,6 +3643,7 @@ public:
         boss.reset();
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         floatingTextMgr.all().clear();
+        narration.reset(); inNarration = false; ch1DialogueDone = false;
         phase = PHASE_PLAY;
         paused = false;
         missionComplete = false; missionCompleteShown = false;
@@ -3296,7 +3677,7 @@ public:
             if (sideBg) sideBg->update();
 
             // ======== Esc key global ========
-            if (escPressed && !gameOver && !atStartScreen && !atTestSelect && !atChapterSelect
+            if (escPressed && !inNarration && !gameOver && !atStartScreen && !atTestSelect && !atChapterSelect
                 && !atOptionScreen && !atSoundMenu && !missionComplete) {
                 if (paused && countdown == -1) {
                     countdown = 3; countdownFrame = 0;
@@ -3306,8 +3687,11 @@ public:
                 }
             }
 
-            // ======== Screens ========
-            if (atStartScreen) {
+            // ======== Narrations ========
+            if (inNarration) {
+                updateNarration(keys);
+                drawNarrationFrame();
+            } else if (atStartScreen) {
                 updateStartScreen(keys, running);
                 drawStartScreen();
             } else if (atChapterSelect) {
@@ -3370,6 +3754,7 @@ private:
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
+                startChapterNarration();
                 sJustEntered = true;
             } else if (startMenuSelection == 1) {
                 atStartScreen = false; atChapterSelect = true;
@@ -3390,7 +3775,7 @@ private:
     void drawStartScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
-        if (background) background->drawStars(r);
+        if (background) background->drawStarsFullscreen(r);
 
         font.drawString(r, "STAR FOX", CENTER_X - 96, 70, 4);
         font.drawString(r, "SPACE SHOOTER", CENTER_X - 117, 120, 3);
@@ -3412,7 +3797,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.10", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.11", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -3430,6 +3815,7 @@ private:
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
+                startChapterNarration();
             }
         }
         if (mk.esc && !escWas) { atChapterSelect = false; atStartScreen = true; cJustEntered = true; }
@@ -3439,7 +3825,7 @@ private:
     void drawChapterScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
-        if (background) background->drawStars(r);
+        if (background) background->drawStarsFullscreen(r);
         font.drawString(r, "SELECT CHAPTER", CENTER_X - 180, 60, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 100, CENTER_X + 180, 100);
@@ -3576,7 +3962,7 @@ private:
     void drawTestScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
-        if (background) background->drawStars(r);
+        if (background) background->drawStarsFullscreen(r);
 
         if (testAtChapterSelect) {
             // Level 1: Chapter selection
@@ -3642,7 +4028,7 @@ private:
     void drawOptionScreen() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
-        if (background) background->drawStars(r);
+        if (background) background->drawStarsFullscreen(r);
         font.drawString(r, "OPTIONS", CENTER_X - 84, 40, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 78, CENTER_X + 180, 78);
@@ -3705,7 +4091,7 @@ private:
     void drawSoundMenu() {
         SDL_Renderer* r = renderer.get();
         renderer.setColor(0, 0, 0); renderer.clear();
-        if (background) background->drawStars(r);
+        if (background) background->drawStarsFullscreen(r);
         font.drawString(r, "SOUND", CENTER_X - 60, 40, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 78, CENTER_X + 180, 78);
@@ -3852,6 +4238,18 @@ private:
             particleMgr.update();
             shockwaveMgr.update();
             floatingTextMgr.update();
+            if (!ch1DialogueDone && score >= 30) {
+                ch1DialogueDone = true;
+                narration.queueDialogue("Hey, I see enemy ships ahead!");
+                narration.queueDialogue("Watch your six, they're flanking us.");
+                narration.queueDialogue("This is a very long test message to verify that the dialogue box automatically wraps text and expands its height when the line is too long for a single row.");
+                narration.queueDialogue("Let's clear them out together!");
+                narration.startDialogue();
+            }
+            bool dEnter = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+            narration.updateDialogue(dEnter);
+            int ticks = narration.popTicks();
+            while (ticks-- > 0) audio.sndTeletype();
 
             // Ch1Boss movement
             if (phase == PHASE_BOSS_FIGHT || phase == PHASE_BOSS_PHASE2) {
@@ -4138,6 +4536,7 @@ private:
                 for (const auto& sw : shockwaveMgr.all()) if (sw.active) shockwaveMgr.draw(renderer.get());
             }
             particleMgr.draw(renderer.get());
+            narration.drawDialogue(renderer.get(), font);
             if (!isSide) {
                 alienMgr.draw(renderer.get());
                 bulletMgr.draw(renderer.get());
@@ -4567,6 +4966,60 @@ private:
             font.drawString(r, "ENTER:return to title", CENTER_X - 150, 490, 2);
         }
     }
+
+    // ======== NARRATION ========
+    void startChapterNarration() {
+        narration.reset();
+        int ch = chapterMgr.getCurrentIndex();
+        switch (ch) {
+            case 0:
+                narration.queue("CH.1  FIRST FLIGHT");
+                narration.queue("The enemy fleet approaches Earth's orbit.");
+                narration.queue("All pilots, intercept and destroy!");
+                break;
+            case 1:
+                narration.queue("CH.2  DEEP SPACE");
+                narration.queue("The battle rages on in the void.");
+                narration.queue("Navigate the corridor and survive.");
+                break;
+            case 2:
+                narration.queue("CH.3  ENEMY FORTRESS");
+                narration.queue("We have located the enemy stronghold.");
+                narration.queue("Break through their defense line!");
+                break;
+            case 3:
+                narration.queue("CH.4  ASTEROID BELT");
+                narration.queue("Danger lurks among the asteroids.");
+                narration.queue("Fly carefully and stay alert.");
+                break;
+            case 4:
+                narration.queue("CH.5  FINAL ASSAULT");
+                narration.queue("This is the final battle.");
+                narration.queue("Give it everything you've got!");
+                break;
+        }
+        narration.start();
+        inNarration = true;
+    }
+
+    void updateNarration(const Uint8* keys) {
+        bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
+        narration.update(enterNow);
+        if (!narration.isActive()) inNarration = false;
+        if (background) background->update();
+        if (sideBg) sideBg->update();
+    }
+
+    void drawNarrationFrame() {
+        SDL_Renderer* r = renderer.get();
+        renderer.setColor(0, 0, 0);
+        renderer.clear();
+        if (background) background->drawStarsFullscreen(r);
+        narration.draw(r, font);
+        SDL_SetRenderDrawColor(r, 130, 130, 130, 255);
+        font.drawString(r, "ENTER:continue", CENTER_X - 78, WIN_HEIGHT - 40, 2);
+    }
+
 };
 
 

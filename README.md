@@ -1,12 +1,12 @@
 # STAR FOX SPACE SHOOTER
 
-> 星际火狐 极简版 — A 2D perspective space shooting game built with C++ and SDL2.
+> 星际火狐 极简版 — A 2D space shooting game built with C++ and SDL2.
 
 ## Gameplay / 玩法
 
-Control your starfighter in perspective space, shoot down alien ships, survive waves of enemies, and defeat the boss.
+Control your starfighter in a massive space, shoot down alien ships, survive waves of enemies, and defeat the boss.
 
-在透视空间中操控星际战机，击落外星飞船，在敌潮中生存，击败关底 Boss。
+在无垠空间中操控星际战机，击落外星飞船，在敌潮中生存，击败关底 Boss。
 
 | Key / 按键 | Action / 操作 |
 |---|---|

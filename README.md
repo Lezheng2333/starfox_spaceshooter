@@ -18,36 +18,17 @@ Control your starfighter in a massive space, shoot down alien ships, survive wav
 
 > macOS 11.0+
 
-[Download v1.2.13](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.13) (latest)
-
-[Download v1.2.12](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.12)
-
-[Download v1.2.11](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.11)
-
-[Download v1.2.10](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.10)
-
-[Download v1.2.9](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.9)
-
-[Download v1.2.8](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.8)
-
-[Download v1.2.7](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.7)
-
-[Download v1.2.5](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.5)
-
-[Download v1.2.4](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.4)
-
-[Download v1.2.2](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.2)
-
-[Download v1.1.0](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.1.0)
+[Download v1.2.14](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.14) (latest)
 
 Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.13)
+## What's New / 最近更新 (v1.2.14)
 
-- **暂停页对话历史** — 暂停时右半显示已触发对话日志，可上下滚动回顾，焦点移动+边界滚动。
-- **对话系统完善** — Ally/Bryssa/Tower 三角色，8个分数触发点，开场对话结束后敌人才刷新。
+- **全新开幕旁白！** 第一章现在有一段完整的开场故事——Martha通过最终考核成为Huntress，基地突然遇袭，主力战机全毁，她开着一架老教练机孤身升空。打字机特效逐字展开，Mario式弹性弹出动画，暗绿色夜精灵风格文本框，滴滴答答的电报音效——还没开打就已经燃起来了！按ENTER推进剧情，按ESC直接跳过开打，你说了算。
+- **实时队友对话系统！** Ally、Bryssa、Tower 三位战友全程在线，8个关键分数点精准触发——刚起飞有人喊加油，3分有人教你打能量体，15分塔台恢复通讯，20分防御炮就位……打到61分还有新对话！名字标签+暗绿文字在画面左侧浮现，打完自动上浮消失，完全不挡视线。重点是——**暂停菜单里能翻对话历史了！** 按暂停切到右半区，所有已经触发的对话一字排开，上下滚动回看，焦点移动顺滑得像翻聊天记录，长句子自动折行整整齐齐。漏了什么话？回来翻就是了！
+- **代码重构 + Bug 修复！** 臃肿的旁白系统已拆成三个精悍小队（NarrationSystem / DialogueSystem / DialogueHistory），各司其职，后续加对话更容易。Boss 蓝色追踪弹不会再抽风变成白色横弹了。所有菜单光标都不会再鬼畜回绕——到顶就停，原路返回。
 
 ## Build from Source / 从源码编译
 
@@ -81,8 +62,7 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.9.app/ + .zip                   # v1.2.9
         ├── Shooter ver1.2.10.app/ + .zip                  # v1.2.10
         ├── Shooter ver1.2.11.app/ + .zip                  # v1.2.11
-        ├── Shooter ver1.2.12.app/ + .zip                  # v1.2.12
-        └── Shooter ver1.2.13.app/ + .zip                  # v1.2.13 (最新)
+        └── Shooter ver1.2.14.app/ + .zip                  # v1.2.14 (最新)
 ```
 
 ## License

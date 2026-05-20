@@ -724,27 +724,80 @@ public:
 // Night Elf dark green color scheme
 // Center narration: chapter intro/outro, blocking (gameplay paused)
 // Left dialogue: in-game teammate hints, non-blocking (future use)
-class NarrationSystem {
+// Shared text drawing helper
+static void drawTextLine(SDL_Renderer* r, const Font& font, const std::string& text,
+                         int tx, int ty, int scale, int mul, int charW) {
+    for (char c : text) {
+        if (c == ' ') { tx += charW; continue; }
+        font.drawChar(r, c, tx, ty, scale, mul);
+        tx += charW;
+    }
+}
+
+// ============== DialogueHistory ==============
+class DialogueHistory {
 public:
-    struct Line {
-        std::vector<std::string> vlines;  // visual lines after \n split + wrap
+    struct Entry {
+        std::string speaker;
+        std::vector<std::string> lines;
         int numLines;
-        int revealed;       // chars shown so far (typewriter)
-        int popupTimer;     // 0→POPUP_FRAMES, Mario pop-in animation
-        int typeTimer;      // frames since last char reveal
-        bool isDialogue;    // true = left-side dialogue, false = center narration
     };
 
-private:
-    std::vector<Line> lines;
-    int curLine;
-    bool active;
-    int bgAlpha;
-    int bgTimer;
-    bool enterWas;
+    void add(const std::string& speaker, const std::vector<std::string>& lines, int numLines) {
+        entries.push_back({speaker, lines, numLines});
+    }
+    const Entry& get(int i) const { return entries[i]; }
+    const Entry& operator[](int i) const { return entries[i]; }
+    int size() const { return (int)entries.size(); }
+    void clear() { entries.clear(); scroll = 0; focusSlot = 2; }
 
-    static const int POPUP_FRAMES = 18;
-    static const int TYPE_SPEED = 2;  // 1 char every N frames (~30 chars/sec at 60fps)
+    int scroll = 0;
+    int focusSlot = 2;  // 0=top, 1=mid, 2=bottom
+
+    void resetView() { scroll = 0; focusSlot = 2; }
+
+    void moveUp() {
+        int total = size();
+        if (total == 0) return;
+        int maxSlot = (total >= 3) ? 2 : total - 1;
+        int bottomIdx = total - 1 - scroll;
+        bool canScrollOlder = (bottomIdx > maxSlot);
+        if (focusSlot > 0) focusSlot--;
+        else if (canScrollOlder) scroll++;
+    }
+    void moveDown() {
+        int total = size();
+        if (total == 0) return;
+        int maxSlot = (total >= 3) ? 2 : total - 1;
+        if (focusSlot < maxSlot) focusSlot++;
+        else if (scroll > 0) scroll--;
+    }
+
+private:
+    std::vector<Entry> entries;
+};
+
+// ============== DialogueSystem ==============
+class DialogueSystem {
+    struct Line {
+        std::string text;
+        std::string speaker;
+        bool sameSpeaker;
+        bool historyRecorded;
+        std::vector<std::string> vlines;
+        int numLines;
+        int state;       // 0=idle, 1=popin, 2=typewriter, 3=display, 4=fadeout
+        int timer;
+        int revealed;
+        int typeTimer;
+        float y;
+        float fadeStartY;
+    };
+
+    static const int POPUP_FRAMES = 15;
+    static const int FADE_FRAMES = 40;
+    static const int WRAP_CHARS = 38;
+    static const int TYPE_SPEED = 2;
 
     static double marioEase(double t) {
         if (t >= 1.0) return 1.0;
@@ -754,18 +807,171 @@ private:
         return 1.0 + c3 * std::pow(t - 1.0, 3) + c1 * std::pow(t - 1.0, 2);
     }
 
-public:
-    NarrationSystem() : curLine(0), active(false), bgAlpha(0), bgTimer(0), enterWas(false),
-          dIdx(0), dActive(false), dEnterWas(false), dTicks(0), cTicks(0) {}
+    std::vector<Line> queue;
+    int idx = 0;
+    bool active = false;
+    bool enterWas = false;
+    int ticks = 0;
 
-    // === Center narration (blocking, manual advance) ===
+public:
+    DialogueHistory history;
+
+    void queueDialogue(const char* speaker, const char* text) {
+        Line l;
+        l.text = text;
+        l.speaker = speaker ? speaker : "";
+        l.sameSpeaker = false;
+        l.historyRecorded = false;
+        l.state = 0; l.timer = 0; l.revealed = 0; l.typeTimer = 0;
+        l.y = 200.0f; l.fadeStartY = 0;
+        std::string s(text);
+        while ((int)s.length() > WRAP_CHARS) {
+            int brk = WRAP_CHARS;
+            while (brk > 0 && s[brk] != ' ') brk--;
+            if (brk == 0) brk = WRAP_CHARS;
+            l.vlines.push_back(s.substr(0, brk));
+            s = s.substr(brk + 1);
+        }
+        if (!s.empty()) l.vlines.push_back(s);
+        l.numLines = (int)l.vlines.size();
+        queue.push_back(l);
+    }
+
+    void start() {
+        if (idx > 0) { queue.erase(queue.begin(), queue.begin() + idx); idx = 0; }
+        if (queue.empty()) return;
+        for (int i = 0; i < (int)queue.size(); ++i)
+            queue[i].sameSpeaker = (i + 1 < (int)queue.size() && queue[i].speaker == queue[i+1].speaker);
+        queue[idx].state = 1; queue[idx].timer = 0;
+        queue[idx].revealed = 0; queue[idx].typeTimer = 0;
+        queue[idx].y = 200.0f;
+        active = true;
+    }
+
+    bool isActive() const { return active; }
+    int popTicks() { int n = ticks; ticks = 0; return n; }
+
+    void reset() {
+        queue.clear(); idx = 0; active = false; enterWas = false; ticks = 0;
+        history.clear();
+    }
+
+    void update(bool enterPressed) {
+        if (!active || idx >= (int)queue.size()) { active = false; return; }
+        auto& l = queue[idx];
+        bool skip = enterPressed && !enterWas;
+        int totalChars = 0;
+        for (auto& vl : l.vlines) totalChars += (int)vl.length();
+
+        switch (l.state) {
+            case 1: // Pop-in
+                l.timer++;
+                if (skip || l.timer >= POPUP_FRAMES) { l.state = 2; l.timer = 0; }
+                break;
+            case 2: // Typewriter
+                if (l.revealed < totalChars) {
+                    if (skip) l.revealed = totalChars;
+                    else { l.typeTimer++; if (l.typeTimer >= TYPE_SPEED) { l.typeTimer = 0; l.revealed++; ticks++; } }
+                } else { l.state = 3; l.timer = 0; }
+                break;
+            case 3: // Display
+                l.timer++;
+                if (skip || l.timer >= 120) { l.state = 4; l.timer = 0; l.fadeStartY = l.y; }
+                break;
+            case 4: { // Fade out
+                l.timer++;
+                double t = (double)l.timer / FADE_FRAMES;
+                l.y = l.fadeStartY - (float)(50.0 * (1.0 - std::pow(1.0 - t, 3.0)));
+                if (skip || l.timer >= FADE_FRAMES) {
+                    if (!l.historyRecorded) {
+                        l.historyRecorded = true;
+                        history.add(l.speaker, l.vlines, l.numLines);
+                    }
+                    idx++;
+                    if (idx >= (int)queue.size()) { active = false; enterWas = enterPressed; return; }
+                    auto& next = queue[idx];
+                    next.state = 1; next.timer = 0; next.revealed = 0; next.typeTimer = 0;
+                    next.y = 200.0f;
+                }
+                break;
+            }
+        }
+        enterWas = enterPressed;
+    }
+
+    void draw(SDL_Renderer* r, const Font& font) {
+        if (!active || idx >= (int)queue.size()) return;
+        auto& l = queue[idx];
+        if (l.vlines.empty()) return;
+
+        const int CH_W = 12, CH_H = 14, PAD_X = 14, PAD_Y = 10, LINE_GAP = 4;
+        double bright = 1.0;
+        int floatOff = 0;
+        if (l.state == 4) {
+            double t = (double)l.timer / FADE_FRAMES;
+            bright = 1.0 - t; if (bright < 0.0) bright = 0.0;
+            floatOff = (int)(50.0 * (1.0 - std::pow(1.0 - t, 3.0)));
+        }
+        int drawY = (int)l.y - floatOff;
+        if (l.state == 1) return;
+
+        const int TR = 50, TG = 155, TB = 70;
+        int rr = (int)(TR * bright), gg = (int)(TG * bright), bb = (int)(TB * bright);
+        int sr = (int)(180 * bright), sg = (int)(200 * bright), sb = (int)(160 * bright);
+        int speakerH = l.speaker.empty() ? 0 : CH_H + 2;
+
+        // Content
+        int charsLeft = l.revealed;
+        SDL_SetRenderDrawColor(r, (Uint8)rr, (Uint8)gg, (Uint8)bb, 255);
+        for (int li = 0; li < l.numLines && charsLeft > 0; ++li) {
+            int show = charsLeft;
+            if (show > (int)l.vlines[li].length()) show = (int)l.vlines[li].length();
+            drawTextLine(r, font, l.vlines[li].substr(0, show),
+                         18 + PAD_X, drawY + PAD_Y + speakerH + li * (CH_H + LINE_GAP),
+                         1, 2, CH_W);
+            charsLeft -= show;
+        }
+        // Speaker (on top)
+        if (!l.speaker.empty()) {
+            SDL_SetRenderDrawColor(r, (Uint8)sr, (Uint8)sg, (Uint8)sb, 255);
+            drawTextLine(r, font, l.speaker, 18 + PAD_X, drawY + PAD_Y, 1, 2, CH_W);
+        }
+    }
+};
+
+// ============== NarrationSystem (center narration only) ==============
+class NarrationSystem {
+    struct Line {
+        std::vector<std::string> vlines;
+        int numLines;
+        int revealed;
+        int popupTimer;
+        int typeTimer;
+    };
+
+    static const int POPUP_FRAMES = 18;
+    static const int TYPE_SPEED = 2;
+
+    static double marioEase(double t) {
+        if (t >= 1.0) return 1.0;
+        if (t <= 0.0) return 0.0;
+        const double c1 = 1.70158;
+        const double c3 = c1 + 1.0;
+        return 1.0 + c3 * std::pow(t - 1.0, 3) + c1 * std::pow(t - 1.0, 2);
+    }
+
+    std::vector<Line> lines;
+    int curLine = 0;
+    bool active = false;
+    int bgAlpha = 0;
+    int bgTimer = 0;
+    bool enterWas = false;
+    int ticks = 0;
+
+public:
     void queue(const char* text) {
         Line l;
-        l.revealed = 0;
-        l.popupTimer = 0;
-        l.typeTimer = 0;
-        l.isDialogue = false;
-        // Split by \n, then wrap each segment to max width
+        l.revealed = 0; l.popupTimer = 0; l.typeTimer = 0;
         std::string s(text);
         const int maxChars = 36;
         std::vector<std::string> segs;
@@ -792,30 +998,16 @@ public:
 
     void start() {
         if (lines.empty()) return;
-        curLine = 0;
-        active = true;
-        bgAlpha = 0;
-        bgTimer = 0;
-        enterWas = true;
-        for (auto& l : lines) {
-            l.revealed = 0;
-            l.popupTimer = 0;
-            l.typeTimer = 0;
-        }
+        curLine = 0; active = true; bgAlpha = 0; bgTimer = 0; enterWas = true;
+        for (auto& l : lines) { l.revealed = 0; l.popupTimer = 0; l.typeTimer = 0; }
     }
 
     bool isActive() const { return active; }
+    int popTicks() { int n = ticks; ticks = 0; return n; }
 
     void reset() {
-        lines.clear();
-        curLine = 0;
-        active = false;
-        bgAlpha = 0;
-        bgTimer = 0;
-        enterWas = false;
-        dQueue.clear();
-        dialogueHistory.clear();
-        dIdx = 0; dActive = false; dEnterWas = false; dTicks = 0; cTicks = 0;
+        lines.clear(); curLine = 0; active = false;
+        bgAlpha = 0; bgTimer = 0; enterWas = false; ticks = 0;
     }
 
     void update(bool enterPressed) {
@@ -824,293 +1016,57 @@ public:
             return;
         }
         if (bgAlpha < 180) { bgTimer++; if (bgTimer >= 2) { bgAlpha += 4; bgTimer = 0; } }
-
         auto& cur = lines[curLine];
-
-        // Phase 1: Mario pop-in
-        if (cur.popupTimer < POPUP_FRAMES) {
-            cur.popupTimer++;
-            return;
-        }
-
-        // Phase 2: Typewriter
+        if (cur.popupTimer < POPUP_FRAMES) { cur.popupTimer++; return; }
         int fullLen = 0;
         for (auto& vl : cur.vlines) fullLen += (int)vl.length();
         if (cur.revealed < fullLen) {
             cur.typeTimer++;
-            if (cur.typeTimer >= TYPE_SPEED) {
-                cur.typeTimer = 0;
-                cur.revealed++;
-                cTicks++;
-            }
+            if (cur.typeTimer >= TYPE_SPEED) { cur.typeTimer = 0; cur.revealed++; ticks++; }
             if (enterPressed && !enterWas) cur.revealed = fullLen;
             enterWas = enterPressed;
             return;
         }
-
-        // Phase 3: ENTER to advance
-        if (enterPressed && !enterWas) {
-            curLine++;
-            if (curLine >= (int)lines.size()) active = false;
-        }
+        if (enterPressed && !enterWas) { curLine++; if (curLine >= (int)lines.size()) active = false; }
         enterWas = enterPressed;
     }
 
     void draw(SDL_Renderer* r, const Font& font) {
         if (!active && bgAlpha <= 0) return;
         if (lines.empty() || curLine >= (int)lines.size()) return;
-
         auto& cur = lines[curLine];
-        int revealed = cur.revealed;
-        int textScale = cur.isDialogue ? 2 : 3;
-        int charW = 6 * textScale;
-        int charH = 7 * textScale;
-        int lineGap = 6;
-
-        // Find max line width
+        int textScale = 3, charW = 18, charH = 21, lineGap = 6;
         int maxLineLen = 0;
         for (auto& vl : cur.vlines)
             if ((int)vl.length() > maxLineLen) maxLineLen = (int)vl.length();
 
-        double popT = (double)cur.popupTimer / POPUP_FRAMES;
-        double popScale = marioEase(popT);
-
+        double popScale = marioEase((double)cur.popupTimer / POPUP_FRAMES);
         int boxW = maxLineLen * charW + 50;
         int boxH = cur.numLines * charH + (cur.numLines - 1) * lineGap + 40;
-        int boxX = CENTER_X - boxW / 2;
-        int boxY = WIN_HEIGHT / 2 - boxH / 2;
-
-        int drawW = (int)(boxW * popScale);
-        int drawH = (int)(boxH * popScale);
-        int drawX = boxX + (boxW - drawW) / 2;
-        int drawY = boxY + (boxH - drawH) / 2;
+        int boxX = CENTER_X - boxW / 2, boxY = WIN_HEIGHT / 2 - boxH / 2;
+        int drawW = (int)(boxW * popScale), drawH = (int)(boxH * popScale);
+        int drawX = boxX + (boxW - drawW) / 2, drawY = boxY + (boxH - drawH) / 2;
         if (drawW < 10 || drawH < 10) return;
 
         const int TR = 50, TG = 155, TB = 70;
         Uint8 ba = (Uint8)(bgAlpha);
-
         SDL_SetRenderDrawColor(r, 10, 25, 15, (Uint8)(ba * 0.85));
         SDL_Rect bgRect = {drawX, drawY, drawW, drawH};
         SDL_RenderFillRect(r, &bgRect);
-
         SDL_SetRenderDrawColor(r, TR, TG, TB, (Uint8)(ba * 0.7));
         SDL_RenderDrawRect(r, &bgRect);
-
         if (cur.popupTimer < POPUP_FRAMES) return;
 
-        // Draw text across visual lines
-        int charsLeft = revealed;
         SDL_SetRenderDrawColor(r, TR, TG, TB, 255);
+        int charsLeft = cur.revealed;
         for (int li = 0; li < cur.numLines && charsLeft > 0; ++li) {
-            auto& vl = cur.vlines[li];
             int show = charsLeft;
-            if (show > (int)vl.length()) show = (int)vl.length();
-            int tx = drawX + 25, ty = drawY + 22 + li * (charH + lineGap);
-            for (int i = 0; i < show; ++i) {
-                if (vl[i] == ' ') { tx += charW; continue; }
-                font.drawChar(r, vl[i], tx, ty, textScale);
-                tx += charW;
-            }
+            if (show > (int)cur.vlines[li].length()) show = (int)cur.vlines[li].length();
+            drawTextLine(r, font, cur.vlines[li].substr(0, show),
+                         drawX + 25, drawY + 22 + li * (charH + lineGap), 3, 1, charW);
             charsLeft -= show;
         }
     }
-
-    // === Dialogue (non-blocking, auto-dismiss, left-center) ===
-    void queueDialogue(const char* speaker, const char* text) {
-        DLine dl;
-        dl.text = text;
-        dl.speaker = speaker ? speaker : "";
-        dl.sameSpeaker = false;
-        dl.state = 0; dl.timer = 0; dl.revealed = 0; dl.typeTimer = 0; dl.historyRecorded = false;
-        dl.y = 200.0f; dl.fadeStartY = 0;
-        std::string s(text);
-        while ((int)s.length() > D_WRAP) {
-            int brk = D_WRAP;
-            while (brk > 0 && s[brk] != ' ') brk--;
-            if (brk == 0) brk = D_WRAP;
-            dl.lines.push_back(s.substr(0, brk));
-            s = s.substr(brk + 1);
-        }
-        if (!s.empty()) dl.lines.push_back(s);
-        dl.numLines = (int)dl.lines.size();
-        dQueue.push_back(dl);
-    }
-
-    void startDialogue() {
-        // Remove already-played entries then start fresh
-        if (dIdx > 0) {
-            dQueue.erase(dQueue.begin(), dQueue.begin() + dIdx);
-            dIdx = 0;
-        }
-        if (dQueue.empty()) return;
-        for (int i = 0; i < (int)dQueue.size(); ++i) {
-            dQueue[i].sameSpeaker = (i + 1 < (int)dQueue.size() &&
-                                     dQueue[i].speaker == dQueue[i+1].speaker);
-        }
-        dQueue[dIdx].state = 1;
-        dQueue[dIdx].timer = 0;
-        dQueue[dIdx].revealed = 0;
-        dQueue[dIdx].typeTimer = 0;
-        dQueue[dIdx].y = 200.0f;
-        dActive = true;
-    }
-
-    bool isDialogueActive() const { return dActive; }
-
-    int popTicks() { int n = dTicks; dTicks = 0; return n; }
-    int popCTicks() { int n = cTicks; cTicks = 0; return n; }
-
-    void updateDialogue(bool enterPressed) {
-        if (!dActive || dIdx >= (int)dQueue.size()) { dActive = false; return; }
-        auto& dl = dQueue[dIdx];
-
-        // ENTER skips typewriter or dismisses current line
-        bool skip = enterPressed && !dEnterWas;
-
-        int totalChars = 0;
-        for (auto& l : dl.lines) totalChars += (int)l.length();
-
-        switch (dl.state) {
-            case 1: // Pop-in
-                dl.timer++;
-                if (skip || dl.timer >= D_POPUP) { dl.state = 2; dl.timer = 0; }
-                break;
-            case 2: // Typewriter
-                if (dl.revealed < totalChars) {
-                    if (skip) { dl.revealed = totalChars; }
-                    else { dl.typeTimer++; if (dl.typeTimer >= TYPE_SPEED) { dl.typeTimer = 0; dl.revealed++; dTicks++; } }
-                } else {
-                    dl.state = 3; dl.timer = 0;
-                }
-                break;
-            case 3: // Display (~2s or manual dismiss)
-                dl.timer++;
-                if (skip || dl.timer >= 120) { dl.state = 4; dl.timer = 0; dl.fadeStartY = dl.y; }
-                break;
-            case 4: { // Fade out: float-up + dim
-                dl.timer++;
-                double t = (double)dl.timer / D_FADE;
-                double ease = 1.0 - std::pow(1.0 - t, 3.0);
-                dl.y = dl.fadeStartY - (float)(50.0 * ease);
-                if (skip || dl.timer >= D_FADE) {
-                    // Record to history when line fully fades out
-                    if (!dl.historyRecorded) {
-                        dl.historyRecorded = true;
-                        HistoryLine hl;
-                        hl.speaker = dl.speaker;
-                        hl.lines = dl.lines;
-                        hl.numLines = dl.numLines;
-                        dialogueHistory.push_back(hl);
-                    }
-                    dIdx++;
-                    if (dIdx >= (int)dQueue.size()) { dActive = false; dEnterWas = enterPressed; return; }
-                    auto& next = dQueue[dIdx];
-                    next.state = 1; next.timer = 0; next.revealed = 0; next.typeTimer = 0;
-                    next.y = 200.0f;
-                }
-                break;
-            }
-        }
-        dEnterWas = enterPressed;
-    }
-
-    void drawDialogue(SDL_Renderer* r, const Font& font) {
-        if (!dActive || dIdx >= (int)dQueue.size()) return;
-        auto& dl = dQueue[dIdx];
-        if (dl.lines.empty()) return;
-
-        const int CH_W = 12, CH_H = 14;
-        const int PAD_X = 14, PAD_Y = 10;
-        const int LINE_GAP = 4;
-
-        double bright = 1.0;
-        int floatOff = 0;
-        if (dl.state == 4) {
-            double t = (double)dl.timer / D_FADE;
-            bright = 1.0 - t;
-            if (bright < 0.0) bright = 0.0;
-            double ease = 1.0 - std::pow(1.0 - t, 3.0);
-            floatOff = (int)(50.0 * ease);
-        }
-
-        int drawX = 18;
-        int drawY = (int)dl.y - floatOff;
-
-        if (dl.state == 1) return;
-
-        const int TR = 50, TG = 155, TB = 70;
-        int rr = (int)(TR * bright), gg = (int)(TG * bright), bb = (int)(TB * bright);
-        int sr = (int)(180 * bright), sg = (int)(200 * bright), sb = (int)(160 * bright);
-
-        int speakerH = 0;
-        if (!dl.speaker.empty()) speakerH = CH_H + 2;
-
-        // Content
-        int charsLeft = dl.revealed;
-        SDL_SetRenderDrawColor(r, (Uint8)rr, (Uint8)gg, (Uint8)bb, 255);
-        for (int li = 0; li < dl.numLines && charsLeft > 0; ++li) {
-            auto& line = dl.lines[li];
-            int show = charsLeft;
-            if (show > (int)line.length()) show = (int)line.length();
-            int tx = drawX + PAD_X;
-            int ty = drawY + PAD_Y + speakerH + li * (CH_H + LINE_GAP);
-            for (int i = 0; i < show; ++i) {
-                if (line[i] == ' ') { tx += CH_W; continue; }
-                font.drawChar(r, line[i], tx, ty, 1, 2);
-                tx += CH_W;
-            }
-            charsLeft -= show;
-        }
-
-        // Speaker (on top)
-        if (!dl.speaker.empty()) {
-            SDL_SetRenderDrawColor(r, (Uint8)sr, (Uint8)sg, (Uint8)sb, 255);
-            int tx = drawX + PAD_X, ty = drawY + PAD_Y;
-            for (char c : dl.speaker) {
-                if (c == ' ') { tx += CH_W; continue; }
-                font.drawChar(r, c, tx, ty, 1, 2);
-                tx += CH_W;
-            }
-        }
-    }
-
-private:
-    struct DLine {
-        std::string text;
-        std::string speaker;
-        bool sameSpeaker;
-        bool historyRecorded;
-        std::vector<std::string> lines;
-        int numLines;
-        int state;
-        int timer;
-        int revealed;
-        int typeTimer;
-        float y;
-        float fadeStartY;
-    };
-
-    static const int D_POPUP = 15;
-    static const int D_FADE = 40;
-    static const int D_WRAP = 38;    // chars per line
-
-    struct HistoryLine {
-        std::string speaker;
-        std::vector<std::string> lines;
-        int numLines;
-    };
-    std::vector<HistoryLine> dialogueHistory;
-
-public:
-    const std::vector<HistoryLine>& getHistory() const { return dialogueHistory; }
-private:
-
-    std::vector<DLine> dQueue;
-    int dIdx;
-    bool dActive;
-    bool dEnterWas;
-    int dTicks;
-    int cTicks;
 };
 
 
@@ -1562,7 +1518,7 @@ public:
         if (blen > 1.0) { beam.dx = bdx / blen; beam.dy = bdy / blen; }
         else { beam.dx = 0; beam.dy = -1; }
         beam.startX = bossX; beam.startY = bossY;
-        beam.active = true; beam.canDamage = false;
+        beam.active = true; beam.canDamage = false; beam.sideScroll = false;
         beam.blueBeam = true; beam.beamTargetIndex = targetIdx;
         bullets.push_back(beam);
     }
@@ -3621,6 +3577,7 @@ class Game {
     Ch1Boss boss;
     FloatingTextManager floatingTextMgr;
     NarrationSystem narration;
+    DialogueSystem dialogueSys;
     ChapterManager chapterMgr;
 
     SDL_Texture* shakeTex;
@@ -3635,11 +3592,9 @@ class Game {
     bool aimAssistOn;
     bool inNarration;
     bool ch1DialogueDone;
-    bool dTrig0, dTrig3, dTrig15, dTrig20, dTrig30, dTrig40, dTrig50, dTrig61;
+    bool triggeredScores[64];
     int baseFireTimer;
     int lastScore;
-    int historyScroll;
-    int historyFocusSlot;
     bool pauseHistoryFocused;
     bool enemiesEnabled;
 
@@ -3696,7 +3651,7 @@ public:
         : renderer(r), audio(a),
           player(&trainingPlane), shakeTex(nullptr),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
-          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false), dTrig0(false), dTrig3(false), dTrig15(false), dTrig20(false), dTrig30(false), dTrig40(false), dTrig50(false), dTrig61(false), baseFireTimer(0), lastScore(-1), historyScroll(0), historyFocusSlot(2), pauseHistoryFocused(false), enemiesEnabled(false),
+          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false), baseFireTimer(0), lastScore(-1), pauseHistoryFocused(false), enemiesEnabled(false),
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
           atOptionScreen(false), atSoundMenu(false), optionFromPause(false), optionJustEntered(true),
           startMenuSelection(0), testScoreSelection(0), chapterSelection(0), menuSelection(0),
@@ -3750,7 +3705,8 @@ public:
         boss.reset();
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         floatingTextMgr.clear();
-        narration.reset(); inNarration = false; ch1DialogueDone = false; dTrig0 = false; dTrig3 = false; dTrig15 = false; dTrig20 = false; dTrig30 = false; dTrig40 = false; dTrig50 = false; dTrig61 = false; baseFireTimer = 0; lastScore = -1; historyScroll = 0; historyFocusSlot = 2; enemiesEnabled = false;
+                narration.reset(); dialogueSys.reset(); inNarration = false; ch1DialogueDone = false;
+        memset(triggeredScores, 0, sizeof(triggeredScores)); baseFireTimer = 0; lastScore = -1; enemiesEnabled = false;
         phase = PHASE_PLAY;
         paused = false;
         missionComplete = false; missionCompleteShown = false;
@@ -3794,7 +3750,7 @@ public:
                 } else {
                     paused = !paused;
                     pauseMenuSelection = 0;
-                    if (paused) { pauseHistoryFocused = false; historyScroll = 0; historyFocusSlot = 2; }
+                    if (paused) { pauseHistoryFocused = false; dialogueSys.history.resetView(); }
                 }
             }
 
@@ -3908,7 +3864,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.13", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.14", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -4326,7 +4282,7 @@ private:
             bulletMgr.decrementCooldown();
 
             // Enable enemies after score-0 dialogue finishes
-            if (!enemiesEnabled && dTrig0 && !narration.isDialogueActive())
+            if (!enemiesEnabled && triggeredScores[0] && !dialogueSys.isActive())
                 enemiesEnabled = true;
 
             // Spawn
@@ -4386,56 +4342,56 @@ private:
             particleMgr.update();
             shockwaveMgr.update();
             floatingTextMgr.update();
-            if (!dTrig0 && lastScore < 0 && score >= 0 && !narration.isDialogueActive()) {
-                dTrig0 = true;
-                narration.queueDialogue("Ally", "Martha, you're the only one in the air.");
-                narration.queueDialogue("Ally", "Hold on as long as you can. The base shockwave cannon is charging.");
-                narration.startDialogue();
+            if (!triggeredScores[0] && lastScore < 0 && score >= 0 && !dialogueSys.isActive()) {
+                triggeredScores[0] = true;
+                dialogueSys.queueDialogue("Ally", "Martha, you're the only one in the air.");
+                dialogueSys.queueDialogue("Ally", "Hold on as long as you can. The base shockwave cannon is charging.");
+                dialogueSys.start();
             }
-            if (!dTrig3 && lastScore < 3 && score >= 3 && !narration.isDialogueActive()) {
-                dTrig3 = true;
-                narration.queueDialogue("Bryssa", "These enemies are made of energy. Destroy them. We can collect the energy.");
-                narration.startDialogue();
+            if (!triggeredScores[3] && lastScore < 3 && score >= 3 && !dialogueSys.isActive()) {
+                triggeredScores[3] = true;
+                dialogueSys.queueDialogue("Bryssa", "These enemies are made of energy. Destroy them. We can collect the energy.");
+                dialogueSys.start();
             }
-            if (!dTrig15 && lastScore < 15 && score >= 15 && !narration.isDialogueActive()) {
-                dTrig15 = true;
-                narration.queueDialogue("", "Tower communication restored.");
-                narration.startDialogue();
+            if (!triggeredScores[15] && lastScore < 15 && score >= 15 && !dialogueSys.isActive()) {
+                triggeredScores[15] = true;
+                dialogueSys.queueDialogue("", "Tower communication restored.");
+                dialogueSys.start();
             }
-            if (!dTrig20 && lastScore < 20 && score >= 20 && !narration.isDialogueActive()) {
-                dTrig20 = true;
-                narration.queueDialogue("Tower", "Shockwave cannon ready.");
-                narration.queueDialogue("Tower", "Just a little more energy!");
-                narration.startDialogue();
+            if (!triggeredScores[20] && lastScore < 20 && score >= 20 && !dialogueSys.isActive()) {
+                triggeredScores[20] = true;
+                dialogueSys.queueDialogue("Tower", "Shockwave cannon ready.");
+                dialogueSys.queueDialogue("Tower", "Just a little more energy!");
+                dialogueSys.start();
             }
-            if (!dTrig30 && lastScore < 30 && score >= 30 && !narration.isDialogueActive()) {
-                dTrig30 = true;
-                narration.queueDialogue("Tower", "Defense system charged.");
-                narration.queueDialogue("Tower", "More enemies incoming. Keep gathering energy.");
-                narration.startDialogue();
+            if (!triggeredScores[30] && lastScore < 30 && score >= 30 && !dialogueSys.isActive()) {
+                triggeredScores[30] = true;
+                dialogueSys.queueDialogue("Tower", "Defense system charged.");
+                dialogueSys.queueDialogue("Tower", "More enemies incoming. Keep gathering energy.");
+                dialogueSys.start();
             }
-            if (!dTrig40 && lastScore < 40 && score >= 40 && !narration.isDialogueActive()) {
-                dTrig40 = true;
-                narration.queueDialogue("Ally", "Stay strong, Martha!");
-                narration.queueDialogue("Bryssa", "The trainer shares energy with the base.");
-                narration.queueDialogue("Bryssa", "You and the base will upgrade together.");
-                narration.startDialogue();
+            if (!triggeredScores[40] && lastScore < 40 && score >= 40 && !dialogueSys.isActive()) {
+                triggeredScores[40] = true;
+                dialogueSys.queueDialogue("Ally", "Stay strong, Martha!");
+                dialogueSys.queueDialogue("Bryssa", "The trainer shares energy with the base.");
+                dialogueSys.queueDialogue("Bryssa", "You and the base will upgrade together.");
+                dialogueSys.start();
             }
-            if (!dTrig50 && lastScore < 50 && score >= 50 && !narration.isDialogueActive()) {
-                dTrig50 = true;
-                narration.queueDialogue("Tower", "Keep gathering energy.");
-                narration.queueDialogue("Ally", "We believe in you.");
-                narration.startDialogue();
+            if (!triggeredScores[50] && lastScore < 50 && score >= 50 && !dialogueSys.isActive()) {
+                triggeredScores[50] = true;
+                dialogueSys.queueDialogue("Tower", "Keep gathering energy.");
+                dialogueSys.queueDialogue("Ally", "We believe in you.");
+                dialogueSys.start();
             }
-            if (!dTrig61 && lastScore < 61 && score >= 61 && !narration.isDialogueActive()) {
-                dTrig61 = true;
-                narration.queueDialogue("Tower", "Base upgraded again.");
-                narration.queueDialogue("Tower", "Radar shows even more enemies.");
-                narration.startDialogue();
+            if (!triggeredScores[61] && lastScore < 61 && score >= 61 && !dialogueSys.isActive()) {
+                triggeredScores[61] = true;
+                dialogueSys.queueDialogue("Tower", "Base upgraded again.");
+                dialogueSys.queueDialogue("Tower", "Radar shows even more enemies.");
+                dialogueSys.start();
             }
             lastScore = score;
-            narration.updateDialogue(false);  // no ENTER skip for dialogue
-            int ticks = narration.popTicks();
+            dialogueSys.update(false);  // no ENTER skip for dialogue
+            int ticks = dialogueSys.popTicks();
             while (ticks-- > 0) audio.sndTeletype();
 
             // Ch1Boss movement
@@ -4716,7 +4672,7 @@ private:
                 for (const auto& sw : shockwaveMgr.all()) if (sw.active) shockwaveMgr.draw(renderer.get());
             }
             particleMgr.draw(renderer.get());
-            narration.drawDialogue(renderer.get(), font);
+            dialogueSys.draw(renderer.get(), font);
             if (!isSide) {
                 alienMgr.draw(renderer.get());
                 bulletMgr.draw(renderer.get());
@@ -5026,25 +4982,8 @@ private:
                 }
             } else {
                 // History focused: focus moves, then scrolls at boundaries
-                int total = (int)narration.getHistory().size();
-                if (total > 0) {
-                    int maxSlot = (total >= 3) ? 2 : total - 1;
-                    if (historyFocusSlot > maxSlot) historyFocusSlot = maxSlot;
-                    int bottomIdx = total - 1 - historyScroll;
-                    if (bottomIdx < 0) { bottomIdx = 0; historyScroll = total - 1; }
-
-                    bool canScrollOlder = (bottomIdx > maxSlot);
-                    bool canScrollNewer = (historyScroll > 0);
-
-                    if (upNow && !pUpWas) {
-                        if (historyFocusSlot > 0) historyFocusSlot--;
-                        else if (canScrollOlder) historyScroll++;
-                    }
-                    if (downNow && !pDownWas) {
-                        if (historyFocusSlot < maxSlot) historyFocusSlot++;
-                        else if (canScrollNewer) historyScroll--;
-                    }
-                }
+                if (upNow && !pUpWas) dialogueSys.history.moveUp();
+                if (downNow && !pDownWas) dialogueSys.history.moveDown();
             }
             pUpWas = upNow; pDownWas = downNow; pEnterWas = enterNow;
             pLeftWas = leftNow; pRightWas = rightNow;
@@ -5073,7 +5012,7 @@ private:
         font.drawString(r, "A/D:switch  W/S:menu  ENTER:confirm", 30, 480, 2);
 
         // === Right half: dialogue history ===
-        auto& hist = narration.getHistory();
+        auto& hist = dialogueSys.history;
         int total = (int)hist.size();
         if (total == 0) return;
 
@@ -5083,10 +5022,10 @@ private:
         const int TR = 50, TG = 155, TB = 70;
         const int SR = 180, SG = 200, SB = 160;
 
-        int bottomIdx = total - 1 - historyScroll;
-        if (bottomIdx < 0) { bottomIdx = 0; historyScroll = total - 1; }
+        int bottomIdx = total - 1 - dialogueSys.history.scroll;
+        if (bottomIdx < 0) { bottomIdx = 0; dialogueSys.history.scroll = total - 1; }
         int maxSlot = (total >= 3) ? 2 : total - 1;
-        int fSlot = historyFocusSlot;
+        int fSlot = dialogueSys.history.focusSlot;
         if (fSlot > maxSlot) fSlot = maxSlot;
 
         // Draw items top to bottom with LINE_GAP between
@@ -5313,7 +5252,7 @@ private:
     void updateNarration(const Uint8* keys) {
         bool enterNow = keys[SDL_SCANCODE_RETURN];
         narration.update(enterNow);
-        int cticks = narration.popCTicks();
+        int cticks = narration.popTicks();
         while (cticks-- > 0) audio.sndTeletype();
         if (!narration.isActive()) inNarration = false;
         if (background) background->update();

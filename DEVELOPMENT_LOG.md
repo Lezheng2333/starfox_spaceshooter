@@ -622,3 +622,13 @@ Ver 1.0.1 | 2026-05-08
     - BUGFIX: 历史对话 DLine::historyRecorded 未初始化导致记录丢失
     - BUGFIX: 历史对话符号错误（idx 上下索引反号）
     - BUGFIX: 2条对话时无法显示两条 — maxScroll 调整
+
+  Ver 1.2.14 | OOP 重构 + Bug 修复
+    - OOP 重构：NarrationSystem 拆分为 3 个独立类
+      （NarrationSystem 中心旁白 / DialogueSystem 游戏对话 / DialogueHistory 历史记录），
+      DialogueSystem 组合 DialogueHistory，职责清晰
+    - 对话触发标志优化：8 个 dTrigXX 布尔值替换为 triggeredScores[64] 数组，
+      新增对话只需添加对应分数索引
+    - 提取共享绘制函数 drawTextLine()，消除中心旁白/对话/历史三处重复绘制代码
+    - 暂停页历史滚动逻辑封装至 DialogueHistory::moveUp()/moveDown()/resetView()
+    - BUGFIX: Boss 蓝色追踪弹变成白色横弹 — addBossBeam() 未初始化 sideScroll=false

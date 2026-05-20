@@ -576,3 +576,30 @@ Ver 1.0.1 | 2026-05-08
     - 星空全屏优化：菜单/旁白界面星空布满全屏（drawStarsFullscreen），
       游戏场景保持天空区域限定绘制
     - 第一章 30 分时触发队友对话测试（三句 + 一句长句验证自动提行）
+
+  Ver 1.2.12 | 第一章剧情旁白 + 对话系统完善 + 代码质量
+    - 第一章开幕旁白剧本：Martha 故事线（Stellar Calendar 24th / Life 基地
+      遇袭 / 塔台通讯中断），9 个文本框，支持 \n 换行+自动折行(36字符/行)，
+      文本框高度随行数动态增加
+    - 中心旁白增加多行渲染：Line 结构改为 vlines 向量，按 \n 拆分后每行
+      独立折行，draw() 根据 maxLineLen 和 numLines 计算动态框尺寸
+    - 对话系统增加说话人标签（speaker 字段）：Ally / Tower，名字用浅黄绿色
+      (180,200,160) 渲染于内容上方，同一说话人连续发言时名字保持不动仅内容切换，
+      说完后名字+内容一起上浮消失
+    - 对话触发改为分数跨阈值检测（lastScore < 阈值 && score >= 阈值），
+      测试模式选高分不会触发之前所有对话；得分 15 新增塔台通讯恢复提示
+    - 对话显示停留时间缩短至约 2 秒（200→120 帧）
+    - 章节旁白打字机增加电报音效（popCTicks + sndTeletype）
+    - 基地燃烧特效：每 4 帧随机位置橙黄火焰粒子，每 30 帧大型爆燃，
+      每 6 帧白色烟雾上升，贴合剧情中基地遇袭残骸场景
+    - 字体 g 字型优化：碗部扩至 4 行(0x0E/11/11/0E)，降部保持右缘单像素，
+      底部 2 像素钩脚(0x06)
+    - 代码质量优化：
+      - Game 增加 ~Game() 析构函数释放 background/sideBg 堆内存
+      - FloatingTextManager::clear() / Ch1AlienManager::pushAlien() 封装
+      - Ch1Boss::triggerPhase2() 封装 Phase2 状态切换（替代 10 行 Ref 操作）
+      - Ch1ParticleManager → ParticleManager / Ch1BulletManager → BulletManager
+        重命名（Ch1/Ch2 共享去掉 Ch1 前缀）
+    - BUGFIX: 测试模式任意分数选入皆为 30 分 — resetGame() 清零
+      testScoreSelection，修复为先保存 savedSel 再取分
+    - BUGFIX: 对话队列重复触发 — startDialogue() 增加 erase 已播放条目逻辑

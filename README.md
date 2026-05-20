@@ -18,7 +18,9 @@ Control your starfighter in a massive space, shoot down alien ships, survive wav
 
 > macOS 11.0+
 
-[Download v1.2.11](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.11) (latest)
+[Download v1.2.12](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.12) (latest)
+
+[Download v1.2.11](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.11)
 
 [Download v1.2.10](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.10)
 
@@ -40,11 +42,10 @@ Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.11)
+## What's New / 最近更新 (v1.2.12)
 
-- **旁白 & 对话系统** — 章节开场剧情旁白（打字机+Mario弹出特效），游戏内队友对话（左侧弹出+自动消失），电报音效。
-- **字体增强** — 新增逗号、引号、问号等24个标点符号，字体支持任意倍数缩放。
-- **星空全屏** — 菜单和旁白界面星空布满整个画面。
+- **第一章剧情旁白** — Martha 故事线开幕，打字机逐字+Mario弹出+电报音效，多行文本框自动适应。
+- **对话系统完善** — 说话人标签（Ally/Tower），同一人连续说话名字不动，分数跨阈值触发，基地燃烧特效。
 
 ## Build from Source / 从源码编译
 
@@ -77,7 +78,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.8.app/ + .zip                   # v1.2.8
         ├── Shooter ver1.2.9.app/ + .zip                   # v1.2.9
         ├── Shooter ver1.2.10.app/ + .zip                  # v1.2.10
-        └── Shooter ver1.2.11.app/ + .zip                  # v1.2.11 (最新)
+        ├── Shooter ver1.2.11.app/ + .zip                  # v1.2.11
+        └── Shooter ver1.2.12.app/ + .zip                  # v1.2.12 (最新)
 ```
 
 ## License

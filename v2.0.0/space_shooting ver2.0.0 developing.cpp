@@ -31,10 +31,10 @@ class Font;
 class Renderer;
 class AudioEngine;
 class FloatingTextManager;
-class Ch1ParticleManager;
+class ParticleManager;
 class TrainingPlane;
 class NightElf;
-class Ch1BulletManager;
+class BulletManager;
 class Ch1ShockwaveManager;
 class Ch1AlienManager;
 class Ch1Boss;
@@ -229,7 +229,7 @@ public:
         setChar('d', "\x01\x01\x0F\x11\x11\x11\x0F");
         setChar('e', "\x00\x00\x0E\x11\x1F\x10\x0E");
         setChar('f', "\x02\x04\x0E\x04\x04\x04\x0E");
-        setChar('g', "\x00\x00\x0F\x11\x0F\x01\x0E");
+        setChar('g', "\x00\x0E\x11\x11\x0E\x01\x06");
         setChar('h', "\x10\x10\x16\x19\x11\x11\x11");
         setChar('i', "\x04\x00\x0C\x04\x04\x04\x0E");
         setChar('j', "\x02\x00\x06\x02\x02\x12\x0C");
@@ -716,7 +716,7 @@ public:
     }
 
     const std::vector<FloatingText>& all() const { return texts; }
-    std::vector<FloatingText>& all() { return texts; }
+    void clear() { texts.clear(); }
 };
 
 
@@ -727,7 +727,8 @@ public:
 class NarrationSystem {
 public:
     struct Line {
-        std::string text;
+        std::vector<std::string> vlines;  // visual lines after \n split + wrap
+        int numLines;
         int revealed;       // chars shown so far (typewriter)
         int popupTimer;     // 0→POPUP_FRAMES, Mario pop-in animation
         int typeTimer;      // frames since last char reveal
@@ -755,16 +756,37 @@ private:
 
 public:
     NarrationSystem() : curLine(0), active(false), bgAlpha(0), bgTimer(0), enterWas(false),
-          dIdx(0), dActive(false), dEnterWas(false), dTicks(0) {}
+          dIdx(0), dActive(false), dEnterWas(false), dTicks(0), cTicks(0) {}
 
     // === Center narration (blocking, manual advance) ===
     void queue(const char* text) {
         Line l;
-        l.text = text;
         l.revealed = 0;
         l.popupTimer = 0;
         l.typeTimer = 0;
         l.isDialogue = false;
+        // Split by \n, then wrap each segment to max width
+        std::string s(text);
+        const int maxChars = 36;
+        std::vector<std::string> segs;
+        size_t pos = 0;
+        while (pos < s.length()) {
+            size_t nl = s.find('\n', pos);
+            if (nl == std::string::npos) nl = s.length();
+            segs.push_back(s.substr(pos, nl - pos));
+            pos = nl + 1;
+        }
+        for (auto& seg : segs) {
+            while ((int)seg.length() > maxChars) {
+                int brk = maxChars;
+                while (brk > 0 && seg[brk] != ' ') brk--;
+                if (brk == 0) brk = maxChars;
+                l.vlines.push_back(seg.substr(0, brk));
+                seg = seg.substr(brk + 1);
+            }
+            if (!seg.empty()) l.vlines.push_back(seg);
+        }
+        l.numLines = (int)l.vlines.size();
         lines.push_back(l);
     }
 
@@ -792,7 +814,7 @@ public:
         bgTimer = 0;
         enterWas = false;
         dQueue.clear();
-        dIdx = 0; dActive = false; dEnterWas = false; dTicks = 0;
+        dIdx = 0; dActive = false; dEnterWas = false; dTicks = 0; cTicks = 0;
     }
 
     void update(bool enterPressed) {
@@ -811,12 +833,14 @@ public:
         }
 
         // Phase 2: Typewriter
-        int fullLen = (int)cur.text.length();
+        int fullLen = 0;
+        for (auto& vl : cur.vlines) fullLen += (int)vl.length();
         if (cur.revealed < fullLen) {
             cur.typeTimer++;
             if (cur.typeTimer >= TYPE_SPEED) {
                 cur.typeTimer = 0;
                 cur.revealed++;
+                cTicks++;
             }
             if (enterPressed && !enterWas) cur.revealed = fullLen;
             enterWas = enterPressed;
@@ -836,20 +860,24 @@ public:
         if (lines.empty() || curLine >= (int)lines.size()) return;
 
         auto& cur = lines[curLine];
-        int textLen = (int)cur.text.length();
         int revealed = cur.revealed;
         int textScale = cur.isDialogue ? 2 : 3;
         int charW = 6 * textScale;
         int charH = 7 * textScale;
+        int lineGap = 6;
+
+        // Find max line width
+        int maxLineLen = 0;
+        for (auto& vl : cur.vlines)
+            if ((int)vl.length() > maxLineLen) maxLineLen = (int)vl.length();
 
         double popT = (double)cur.popupTimer / POPUP_FRAMES;
         double popScale = marioEase(popT);
 
-        int boxW, boxH, boxX, boxY;
-        boxW = textLen * charW + 60;
-        boxH = charH + 48;
-        boxX = CENTER_X - boxW / 2;
-        boxY = WIN_HEIGHT / 2 - boxH / 2;
+        int boxW = maxLineLen * charW + 50;
+        int boxH = cur.numLines * charH + (cur.numLines - 1) * lineGap + 40;
+        int boxX = CENTER_X - boxW / 2;
+        int boxY = WIN_HEIGHT / 2 - boxH / 2;
 
         int drawW = (int)(boxW * popScale);
         int drawH = (int)(boxH * popScale);
@@ -869,22 +897,31 @@ public:
 
         if (cur.popupTimer < POPUP_FRAMES) return;
 
+        // Draw text across visual lines
+        int charsLeft = revealed;
         SDL_SetRenderDrawColor(r, TR, TG, TB, 255);
-        int tx = drawX + 25, ty = drawY + 22;
-        for (int i = 0; i < revealed; ++i) {
-            if (cur.text[i] == ' ') { tx += charW; continue; }
-            font.drawChar(r, cur.text[i], tx, ty, textScale);
-            tx += charW;
+        for (int li = 0; li < cur.numLines && charsLeft > 0; ++li) {
+            auto& vl = cur.vlines[li];
+            int show = charsLeft;
+            if (show > (int)vl.length()) show = (int)vl.length();
+            int tx = drawX + 25, ty = drawY + 22 + li * (charH + lineGap);
+            for (int i = 0; i < show; ++i) {
+                if (vl[i] == ' ') { tx += charW; continue; }
+                font.drawChar(r, vl[i], tx, ty, textScale);
+                tx += charW;
+            }
+            charsLeft -= show;
         }
     }
 
     // === Dialogue (non-blocking, auto-dismiss, left-center) ===
-    void queueDialogue(const char* text) {
+    void queueDialogue(const char* speaker, const char* text) {
         DLine dl;
         dl.text = text;
+        dl.speaker = speaker ? speaker : "";
+        dl.sameSpeaker = false;
         dl.state = 0; dl.timer = 0; dl.revealed = 0; dl.typeTimer = 0;
         dl.y = 200.0f; dl.fadeStartY = 0;
-        // Wrap into visual lines
         std::string s(text);
         while ((int)s.length() > D_WRAP) {
             int brk = D_WRAP;
@@ -899,8 +936,16 @@ public:
     }
 
     void startDialogue() {
+        // Remove already-played entries then start fresh
+        if (dIdx > 0) {
+            dQueue.erase(dQueue.begin(), dQueue.begin() + dIdx);
+            dIdx = 0;
+        }
         if (dQueue.empty()) return;
-        dIdx = 0;
+        for (int i = 0; i < (int)dQueue.size(); ++i) {
+            dQueue[i].sameSpeaker = (i + 1 < (int)dQueue.size() &&
+                                     dQueue[i].speaker == dQueue[i+1].speaker);
+        }
         dQueue[dIdx].state = 1;
         dQueue[dIdx].timer = 0;
         dQueue[dIdx].revealed = 0;
@@ -912,6 +957,7 @@ public:
     bool isDialogueActive() const { return dActive; }
 
     int popTicks() { int n = dTicks; dTicks = 0; return n; }
+    int popCTicks() { int n = cTicks; cTicks = 0; return n; }
 
     void updateDialogue(bool enterPressed) {
         if (!dActive || dIdx >= (int)dQueue.size()) { dActive = false; return; }
@@ -936,9 +982,9 @@ public:
                     dl.state = 3; dl.timer = 0;
                 }
                 break;
-            case 3: // Display (3.3s or manual dismiss)
+            case 3: // Display (~2s or manual dismiss)
                 dl.timer++;
-                if (skip || dl.timer >= 200) { dl.state = 4; dl.timer = 0; dl.fadeStartY = dl.y; }
+                if (skip || dl.timer >= 120) { dl.state = 4; dl.timer = 0; dl.fadeStartY = dl.y; }
                 break;
             case 4: { // Fade out: float-up + dim
                 dl.timer++;
@@ -946,11 +992,12 @@ public:
                 double ease = 1.0 - std::pow(1.0 - t, 3.0);
                 dl.y = dl.fadeStartY - (float)(50.0 * ease);
                 if (skip || dl.timer >= D_FADE) {
+                    bool wasSame = dl.sameSpeaker;
                     dIdx++;
                     if (dIdx >= (int)dQueue.size()) { dActive = false; dEnterWas = enterPressed; return; }
                     auto& next = dQueue[dIdx];
                     next.state = 1; next.timer = 0; next.revealed = 0; next.typeTimer = 0;
-                    next.y = 200.0f;
+                    next.y = wasSame ? dl.fadeStartY : 200.0f;
                 }
                 break;
             }
@@ -963,11 +1010,10 @@ public:
         auto& dl = dQueue[dIdx];
         if (dl.lines.empty()) return;
 
-        const int CH_W = 12, CH_H = 14;         // scale=1,mul=2
+        const int CH_W = 12, CH_H = 14;
         const int PAD_X = 14, PAD_Y = 10;
         const int LINE_GAP = 4;
 
-        // Fade: dim RGB + float-up offset
         double bright = 1.0;
         int floatOff = 0;
         if (dl.state == 4) {
@@ -985,7 +1031,22 @@ public:
 
         const int TR = 50, TG = 155, TB = 70;
         int rr = (int)(TR * bright), gg = (int)(TG * bright), bb = (int)(TB * bright);
+        int sr = (int)(180 * bright), sg = (int)(200 * bright), sb = (int)(160 * bright);
 
+        // Speaker name (if present)
+        int speakerH = 0;
+        if (!dl.speaker.empty()) {
+            speakerH = CH_H + 2;
+            SDL_SetRenderDrawColor(r, (Uint8)sr, (Uint8)sg, (Uint8)sb, 255);
+            int tx = drawX + PAD_X, ty = drawY + PAD_Y;
+            for (char c : dl.speaker) {
+                if (c == ' ') { tx += CH_W; continue; }
+                font.drawChar(r, c, tx, ty, 1, 2);
+                tx += CH_W;
+            }
+        }
+
+        // Content lines
         int charsLeft = dl.revealed;
         SDL_SetRenderDrawColor(r, (Uint8)rr, (Uint8)gg, (Uint8)bb, 255);
         for (int li = 0; li < dl.numLines && charsLeft > 0; ++li) {
@@ -993,7 +1054,7 @@ public:
             int show = charsLeft;
             if (show > (int)line.length()) show = (int)line.length();
             int tx = drawX + PAD_X;
-            int ty = drawY + PAD_Y + li * (CH_H + LINE_GAP);
+            int ty = drawY + PAD_Y + speakerH + li * (CH_H + LINE_GAP);
             for (int i = 0; i < show; ++i) {
                 if (line[i] == ' ') { tx += CH_W; continue; }
                 font.drawChar(r, line[i], tx, ty, 1, 2);
@@ -1006,9 +1067,11 @@ public:
 private:
     struct DLine {
         std::string text;
+        std::string speaker;         // speaker name (empty = no label)
+        bool sameSpeaker;            // true if next line is from same speaker
         std::vector<std::string> lines;
         int numLines;
-        int state;       // 0=idle, 1=popin, 2=typewriter, 3=display, 4=fadeout
+        int state;
         int timer;
         int revealed;
         int typeTimer;
@@ -1025,11 +1088,12 @@ private:
     bool dActive;
     bool dEnterWas;
     int dTicks;
+    int cTicks;
 };
 
 
-// ============== Ch1ParticleManager ==============
-class Ch1ParticleManager {
+// ============== ParticleManager ==============
+class ParticleManager {
     std::vector<Ch1Particle> particles;
 public:
     void spawnExplosion(double x, double y, int count) {
@@ -1419,8 +1483,8 @@ public:
 };
 
 
-// ============== Ch1BulletManager ==============
-class Ch1BulletManager {
+// ============== BulletManager ==============
+class BulletManager {
     std::vector<Ch1Bullet> bullets;
     int fireCooldown;
     int fireDelay;
@@ -1430,7 +1494,7 @@ class Ch1BulletManager {
     static constexpr double BULLET_RANGE = 370.0;
 
 public:
-    Ch1BulletManager() : fireCooldown(0), fireDelay(BASE_FIRE_DELAY), bulletSpeed(BASE_BULLET_SPEED) {}
+    BulletManager() : fireCooldown(0), fireDelay(BASE_FIRE_DELAY), bulletSpeed(BASE_BULLET_SPEED) {}
 
     void reset() { bullets.clear(); fireCooldown = 0; updateParams(0); }
 
@@ -1626,7 +1690,7 @@ public:
         interval = sec * 60;
     }
 
-    void attemptAutoRelease(int score, Player& pl, FloatingTextManager& ft, AudioEngine* audio, Ch1ParticleManager* pm) {
+    void attemptAutoRelease(int score, Player& pl, FloatingTextManager& ft, AudioEngine* audio, ParticleManager* pm) {
         if (score < 30) return;
         int curLv = score / 30;
         if (curLv > lastLevel) {
@@ -1645,7 +1709,7 @@ public:
         }
     }
 
-    void spawn(AudioEngine* audio, Ch1ParticleManager* pm = nullptr) {
+    void spawn(AudioEngine* audio, ParticleManager* pm = nullptr) {
         if (audio) audio->sndShockwave();
         Ch1Shockwave sw;
         sw.y = WIN_HEIGHT;
@@ -1715,7 +1779,7 @@ public:
         }
     }
 
-    bool collideWithAlien(Ch1Alien& a, Ch1ParticleManager& pm, AudioEngine* audio, int& score) {
+    bool collideWithAlien(Ch1Alien& a, ParticleManager& pm, AudioEngine* audio, int& score) {
         for (auto& sw : shockwaves) {
             if (!sw.active) continue;
             if (a.lastHitBySW == sw.id) continue;
@@ -1743,7 +1807,7 @@ public:
     }
 
     int collideWithBoss(double bossX, double bossY, int& bossLastHitBySW, int& bossBonusHp, int& bossHp,
-                        int& bossFlashTimer, Ch1ParticleManager& pm, AudioEngine* audio) {
+                        int& bossFlashTimer, ParticleManager& pm, AudioEngine* audio) {
         int dmgDealt = 0;
         for (auto& sw : shockwaves) {
             if (!sw.active) continue;
@@ -1884,7 +1948,7 @@ public:
     }
 
     void update(bool duringBossAbsorb, double speedFactor, bool& gameOver, int& baseHP,
-                Ch1ParticleManager& pm, AudioEngine* audio) {
+                ParticleManager& pm, AudioEngine* audio) {
         const double A = WIN_WIDTH / 2.0 - 15.0;
         const double B = 75.0;
         for (auto& a : aliens) {
@@ -1995,6 +2059,7 @@ public:
     }
 
     std::vector<Ch1Alien>& all() { return aliens; }
+    void pushAlien(const Ch1Alien& a) { aliens.push_back(a); }
     int countAlive() const {
         int c = 0;
         for (const auto& a : aliens) if (a.active) c++;
@@ -2149,6 +2214,17 @@ public:
         }
     }
 
+    void triggerPhase2() {
+        phase2Triggered = true;
+        shakeTimer = 120;
+        absorbTimer = 0;
+        postAbsorbTimer = 0;
+        absorbCooldown = 0;
+        absorbState = IDLE;
+        absorbTargetIdx = -1;
+        setCh1HealWavesEnabled(false);
+    }
+
     void updateMovement() {
         moveTime += 0.025;
         x = CENTER_X + std::sin(moveTime) * (cfg ? cfg->moveAmplitudeX : 140.0);
@@ -2156,7 +2232,7 @@ public:
         if (flashTimer > 0) flashTimer--;
     }
 
-    void updateCh1HealWaves(Ch1ParticleManager& pm, Ch1AlienManager& aliens, AudioEngine* audio) {
+    void updateCh1HealWaves(ParticleManager& pm, Ch1AlienManager& aliens, AudioEngine* audio) {
         if (!healWavesEnabled) return;
         healWaveTimer++;
         int interval = cfg ? cfg->healWaveInterval : 420;
@@ -2202,8 +2278,8 @@ public:
     }
 
     // Shared absorb state machine (deduplicated from INTRO and PHASE2)
-    bool updateAbsorbStateMachine(Ch1AlienManager& aliens, Ch1BulletManager& bullets,
-                                   Ch1ParticleManager&, AudioEngine*) {
+    bool updateAbsorbStateMachine(Ch1AlienManager& aliens, BulletManager& bullets,
+                                   ParticleManager&, AudioEngine*) {
         if (absorbCooldown > 0) absorbCooldown--;
 
         if (absorbState == IDLE) {
@@ -2247,7 +2323,7 @@ public:
     }
 
     // Shared absorb animation (deduplicated)
-    void updateAbsorbAnimations(Ch1AlienManager& aliens, Ch1ParticleManager& pm) {
+    void updateAbsorbAnimations(Ch1AlienManager& aliens, ParticleManager& pm) {
         for (auto& a : aliens.all()) {
             if (!a.active || !a.beingAbsorbed) continue;
             a.absorbFrame++;
@@ -2822,7 +2898,7 @@ protected:
     int& hpRef;
     bool& goRef;
 
-    void updateBullets(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
+    void updateBullets(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
                        Player& pl, FloatingTextManager& ftMgr) {
         for (auto& b : bullets) {
             if (!b.active) continue;
@@ -2975,7 +3051,7 @@ public:
         enemies.push_back(e);
     }
 
-    void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
+    void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
                 int& score, Player& pl, FloatingTextManager& ftMgr) {
         for (auto& e : enemies) {
             if (e.defeated) {
@@ -3171,7 +3247,7 @@ public:
     void forceSpawn() { spawnOne(); }
     const std::vector<Ch2Alien>& getAliens() const { return aliens; }
 
-    void update(Ch1BulletManager& bulletMgr, Ch1ParticleManager& particleMgr, AudioEngine& audio,
+    void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
                 int& score, Player& pl, FloatingTextManager& ftMgr) {
         for (auto& a : aliens) {
             if (!a.active && !a.defeated) continue;
@@ -3516,9 +3592,9 @@ class Game {
     TrainingPlane trainingPlane;
     NightElf nightElf;
     Player* player;
-    Ch1BulletManager bulletMgr;
+    BulletManager bulletMgr;
     Ch1AlienManager alienMgr;
-    Ch1ParticleManager particleMgr;
+    ParticleManager particleMgr;
     Ch1ShockwaveManager shockwaveMgr;
     Ch1Boss boss;
     FloatingTextManager floatingTextMgr;
@@ -3537,6 +3613,9 @@ class Game {
     bool aimAssistOn;
     bool inNarration;
     bool ch1DialogueDone;
+    bool dTrig0, dTrig3, dTrig15, dTrig20;
+    int baseFireTimer;
+    int lastScore;
 
     // Screens
     bool atStartScreen, atTestSelect, atChapterSelect, atOptionScreen, atSoundMenu;
@@ -3591,7 +3670,7 @@ public:
         : renderer(r), audio(a),
           player(&trainingPlane), shakeTex(nullptr),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
-          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false),
+          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false), dTrig0(false), dTrig3(false), dTrig15(false), dTrig20(false), baseFireTimer(0), lastScore(-1),
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
           atOptionScreen(false), atSoundMenu(false), optionFromPause(false), optionJustEntered(true),
           startMenuSelection(0), testScoreSelection(0), chapterSelection(0), menuSelection(0),
@@ -3612,6 +3691,8 @@ public:
         background = new Ch1Background(chapterMgr.getConfig());
         sideBg = new Ch2Background();
     }
+
+    ~Game() { delete background; delete sideBg; }
 
     void resetGame() {
         score = 0;
@@ -3642,8 +3723,8 @@ public:
         shockwaveMgr.reset();
         boss.reset();
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
-        floatingTextMgr.all().clear();
-        narration.reset(); inNarration = false; ch1DialogueDone = false;
+        floatingTextMgr.clear();
+        narration.reset(); inNarration = false; ch1DialogueDone = false; dTrig0 = false; dTrig3 = false; dTrig15 = false; dTrig20 = false; baseFireTimer = 0; lastScore = -1;
         phase = PHASE_PLAY;
         paused = false;
         missionComplete = false; missionCompleteShown = false;
@@ -3797,7 +3878,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.11", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.12", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -3877,6 +3958,7 @@ private:
             if (mk.up && !upWas)     testScoreSelection = (testScoreSelection - 1 + 9) % 9;
             if (mk.down && !downWas) testScoreSelection = (testScoreSelection + 1) % 9;
         if (mk.enter && !enterWas) {
+            int savedSel = testScoreSelection;
             resetGame();
             atTestSelect = false; tJustEntered = true;
             atStartScreen = false;
@@ -3885,12 +3967,12 @@ private:
             bulletMgr.updateParams(0);
             shockwaveMgr.updateParams(0);
             const int testScores[6] = {30, 60, 90, 120, 150, 180};
-            if (testScoreSelection < 6) {
-                score = testScores[testScoreSelection];
+            if (savedSel < 6) {
+                score = testScores[savedSel];
                 shockwaveMgr.setPending(true);
                 bulletMgr.updateParams(score / 30);
                 shockwaveMgr.updateParams(score / 30);
-            } else if (testScoreSelection == 6) {
+            } else if (savedSel == 6) {
                 // 200 BOSS: 直接进入Boss登场动画
                 score = 200;
                 bulletMgr.updateParams(score / 30);
@@ -3909,9 +3991,9 @@ private:
                     a.alienType = 0;
                     a.hp = 3 + rand() % 3; a.maxHp = a.hp;
                     a.active = true;
-                    alienMgr.all().push_back(a);
+                    alienMgr.pushAlien(a);
                 }
-            } else if (testScoreSelection == 7) {
+            } else if (savedSel == 7) {
                 // BOSS PH.2: 直接进入Boss二阶段
                 score = 200;
                 bulletMgr.updateParams(score / 30);
@@ -3936,7 +4018,7 @@ private:
                     a.alienType = 0;
                     a.hp = 3 + rand() % 3; a.maxHp = a.hp;
                     a.active = true;
-                    alienMgr.all().push_back(a);
+                    alienMgr.pushAlien(a);
                 }
             } else {
                 // BOSS 1HP: 快速检验战败流程
@@ -3954,6 +4036,7 @@ private:
                 boss.setCh1HealWavesEnabled(true);
                 shockwaveMgr.setPending(true);
             }
+            lastScore = score;
         }
     }
         upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc;
@@ -4235,17 +4318,59 @@ private:
                 alienMgr.update(false, 0, gameOver, baseHP, particleMgr, &audio);
                 if (gameOver) menuSelection = 0;
             }
+            // Base fire effects (burning wreckage on the ground)
+            baseFireTimer++;
+            if (baseFireTimer % 4 == 0) {
+                // Fire particles at 2-3 random spots on the base
+                for (int fi = 0; fi < 3; ++fi) {
+                    int fx = 100 + rand() % 600;
+                    int fy = WIN_HEIGHT - 25 - rand() % 45;
+                    particleMgr.spawnExplosion(fx, fy, 2 + rand() % 3);
+                }
+            }
+            if (baseFireTimer % 30 == 0) {
+                // Larger burst at a random base position
+                int bx = 120 + rand() % 560;
+                int by = WIN_HEIGHT - 20 - rand() % 35;
+                particleMgr.spawnExplosion(bx, by, 8 + rand() % 10);
+            }
+            // Smoke: white particles rising from base
+            if (baseFireTimer % 6 == 0) {
+                for (int si = 0; si < 2; ++si) {
+                    int sx = 80 + rand() % 640;
+                    int sy = WIN_HEIGHT - 15 - rand() % 40;
+                    double svx = (rand() % 30 - 15) / 20.0;
+                    double svy = -(0.6 + (rand() % 40) / 100.0);
+                    particleMgr.spawnWhiteParticle(sx, sy, svx, svy, 30 + rand() % 20);
+                }
+            }
             particleMgr.update();
             shockwaveMgr.update();
             floatingTextMgr.update();
-            if (!ch1DialogueDone && score >= 30) {
-                ch1DialogueDone = true;
-                narration.queueDialogue("Hey, I see enemy ships ahead!");
-                narration.queueDialogue("Watch your six, they're flanking us.");
-                narration.queueDialogue("This is a very long test message to verify that the dialogue box automatically wraps text and expands its height when the line is too long for a single row.");
-                narration.queueDialogue("Let's clear them out together!");
+            if (!dTrig0 && lastScore < 0 && score >= 0 && !narration.isDialogueActive()) {
+                dTrig0 = true;
+                narration.queueDialogue("Ally", "Martha, you're the only one who made it up.");
+                narration.queueDialogue("Ally", "Hold on. Base defenses are powering up.");
                 narration.startDialogue();
             }
+            if (!dTrig3 && lastScore < 3 && score >= 3 && !narration.isDialogueActive()) {
+                dTrig3 = true;
+                narration.queueDialogue("Ally", "These enemies are made of pure energy.");
+                narration.queueDialogue("Ally", "Shoot them down -- we can harvest it.");
+                narration.startDialogue();
+            }
+            if (!dTrig15 && lastScore < 15 && score >= 15 && !narration.isDialogueActive()) {
+                dTrig15 = true;
+                narration.queueDialogue("Tower", "Tower communication restored.");
+                narration.startDialogue();
+            }
+            if (!dTrig20 && lastScore < 20 && score >= 20 && !narration.isDialogueActive()) {
+                dTrig20 = true;
+                narration.queueDialogue("Tower", "Defense batteries are ready.");
+                narration.queueDialogue("Tower", "Just need a little more energy!");
+                narration.startDialogue();
+            }
+            lastScore = score;
             bool dEnter = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
             narration.updateDialogue(dEnter);
             int ticks = narration.popTicks();
@@ -4263,15 +4388,8 @@ private:
             int totalHP = boss.getHp() + boss.getBonusHp();
             if (phase == PHASE_BOSS_FIGHT && !boss.isPhase2Triggered() && boss.isActive() &&
                 totalHP <= (boss.getMaxHp() + boss.getBonusHp()) / 2) {
-                boss.phase2TriggeredRef() = true;
+                boss.triggerPhase2();
                 phase = PHASE_BOSS_PHASE2;
-                boss.shakeTimerRef() = 120;
-                boss.absorbTimerRef() = 0;
-                boss.postAbsorbTimerRef() = 0;
-                boss.absorbCooldownRef() = 0;
-                boss.absorbStateRef() = Ch1Boss::IDLE;
-                boss.absorbTargetIdxRef() = -1;
-                boss.setCh1HealWavesEnabled(false);
                 alienMgr.setAllInvincible();
             }
 
@@ -4759,7 +4877,7 @@ private:
         SDL_Renderer* r = renderer.get();
         double tPlane = (player->getX() - perspLeft(player->getY())) / perspWidth(player->getY());
         if (tPlane < 0.0) tPlane = 0.0; if (tPlane > 1.0) tPlane = 1.0;
-        double range = Ch1BulletManager::getBulletRange();
+        double range = BulletManager::getBulletRange();
         double ty = player->getY() - range;
         double tx = perspLeft(ty) + tPlane * perspWidth(ty);
         double dx = tx - player->getX(), dy = ty - player->getY();
@@ -4973,9 +5091,16 @@ private:
         int ch = chapterMgr.getCurrentIndex();
         switch (ch) {
             case 0:
-                narration.queue("CH.1  FIRST FLIGHT");
-                narration.queue("The enemy fleet approaches Earth's orbit.");
-                narration.queue("All pilots, intercept and destroy!");
+                narration.queue("Stellar Calendar 24th\nIn the deep space.\nThe \"Life\" base.");
+                narration.queue("Martha aces her final test.\nShe's now a \"Huntress\".");
+                narration.queue("Off the plane.\nHeading for the rest area.");
+                narration.queue("A series of massive explosions behind her.\nShe turns --");
+                narration.queue("All main fighters. Wreckage.");
+                narration.queue("Tower: \"Unknown objects approaching!\nAll fighters scramble!\"");
+                narration.queue("Martha runs back to the hangar.\nOnly one old trainer left.");
+                narration.queue("Into the cockpit. Engines up. \nShe reports:\"I'm taking off.\"");
+                narration.queue("No answer from the tower.");
+                narration.queue("Only a sharp, harsh noise.");
                 break;
             case 1:
                 narration.queue("CH.2  DEEP SPACE");
@@ -5005,6 +5130,8 @@ private:
     void updateNarration(const Uint8* keys) {
         bool enterNow = keys[SDL_SCANCODE_RETURN] || keys[SDL_SCANCODE_SPACE];
         narration.update(enterNow);
+        int cticks = narration.popCTicks();
+        while (cticks-- > 0) audio.sndTeletype();
         if (!narration.isActive()) inNarration = false;
         if (background) background->update();
         if (sideBg) sideBg->update();

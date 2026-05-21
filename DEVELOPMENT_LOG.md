@@ -632,3 +632,25 @@ Ver 1.0.1 | 2026-05-08
     - 提取共享绘制函数 drawTextLine()，消除中心旁白/对话/历史三处重复绘制代码
     - 暂停页历史滚动逻辑封装至 DialogueHistory::moveUp()/moveDown()/resetView()
     - BUGFIX: Boss 蓝色追踪弹变成白色横弹 — addBossBeam() 未初始化 sideScroll=false
+
+  Ver 1.2.15 | 对话系统扩充 + 第一章章节守卫 + 测试模式历史预填充
+    - 对话系统大幅扩充：
+      - 说话人名称更新：Ally (ai copilot) / Tower (ai) / Bryssa from Tower
+      - 新增 13 个分数触发点（55/70/80/90/105/120/160/180/195/210），
+        覆盖从系统自检到 Telamondo 主力舰逼近的完整叙事弧线
+      - Score 3 对话拆为两句，speaker 由 Bryssa 改为 Ally
+      - Score 20/61 第二句 speaker 由 Tower 改为 Bryssa from Tower
+      - Score 50 移除 Ally 第二句；Score 61 第二句加 "Watch out!"
+      - Boss 半血进入二阶段时触发新对话：
+        "Telamondo can absorb energy!" 三句
+      - 开幕旁白 Flight code B295 → 21395
+    - 第一章章节守卫：所有 Ch1 对话触发包裹在 chapterNumber==1 检查中，
+      第二章 score 从 0 重新计数不会触发第一章对话；
+      enemiesEnabled 在非第一章直接启用
+    - 测试模式历史预填充：从任意分数进入测试，低于该分数的所有对话
+      直接写入暂停页历史日志，方便回顾完整对话链；
+      PH() 宏精简重复代码
+    - Boss Phase2 对话触发统一：新增 bossPhase2DialogueTriggered 标志，
+      非分数触发归入统一对话区块，所有对话代码集中管理
+    - triggeredScores 数组扩容：64 → 256，支持 200+ 分数对话
+    - 字体 g 字型重新设计：(0x00/0F/11/0F/01/19/0F) 顶部留空、碗部饱满、降部左勾

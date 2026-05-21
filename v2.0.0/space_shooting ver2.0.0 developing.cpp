@@ -229,7 +229,7 @@ public:
         setChar('d', "\x01\x01\x0F\x11\x11\x11\x0F");
         setChar('e', "\x00\x00\x0E\x11\x1F\x10\x0E");
         setChar('f', "\x02\x04\x0E\x04\x04\x04\x0E");
-        setChar('g', "\x00\x0E\x11\x0F\x01\x11\x1F");
+        setChar('g', "\x00\x0F\x11\x0F\x01\x19\x0F");
         setChar('h', "\x10\x10\x16\x19\x11\x11\x11");
         setChar('i', "\x04\x00\x0C\x04\x04\x04\x0E");
         setChar('j', "\x02\x00\x06\x02\x02\x12\x0C");
@@ -3592,6 +3592,7 @@ class Game {
     bool aimAssistOn;
     bool inNarration;
     bool ch1DialogueDone;
+    bool bossPhase2DialogueTriggered;
     bool triggeredScores[256];
     int baseFireTimer;
     int lastScore;
@@ -3651,7 +3652,7 @@ public:
         : renderer(r), audio(a),
           player(&trainingPlane), shakeTex(nullptr),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
-          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false), baseFireTimer(0), lastScore(-1), pauseHistoryFocused(false), enemiesEnabled(false),
+          paused(false), gameOver(false), aimAssistOn(false), inNarration(false), ch1DialogueDone(false), bossPhase2DialogueTriggered(false), baseFireTimer(0), lastScore(-1), pauseHistoryFocused(false), enemiesEnabled(false),
           atStartScreen(true), atTestSelect(false), atChapterSelect(false),
           atOptionScreen(false), atSoundMenu(false), optionFromPause(false), optionJustEntered(true),
           startMenuSelection(0), testScoreSelection(0), chapterSelection(0), menuSelection(0),
@@ -3705,7 +3706,7 @@ public:
         boss.reset();
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         floatingTextMgr.clear();
-                narration.reset(); dialogueSys.reset(); inNarration = false; ch1DialogueDone = false;
+                narration.reset(); dialogueSys.reset(); inNarration = false; ch1DialogueDone = false; bossPhase2DialogueTriggered = false;
         memset(triggeredScores, 0, sizeof(triggeredScores)); baseFireTimer = 0; lastScore = -1; enemiesEnabled = false;
         phase = PHASE_PLAY;
         paused = false;
@@ -3864,7 +3865,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.14", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.15", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -4024,6 +4025,40 @@ private:
                 phase = PHASE_BOSS_FIGHT;
                 boss.setCh1HealWavesEnabled(true);
                 shockwaveMgr.setPending(true);
+            }
+            // Pre-populate Ch1 dialogue history for test mode
+            if (chapterMgr.getConfig().chapterNumber == 1 && score > 0) {
+                #define PH(scr, spk, ...) \
+                    if (score > scr) { \
+                        triggeredScores[scr] = true; \
+                        dialogueSys.history.add(spk, __VA_ARGS__); \
+                    }
+                PH(0, "Ally (ai copilot)", {"Martha, you're the only one in the air.", "Hold on as long as you can. The base shockwave cannon is charging."}, 2);
+                PH(3, "Ally (ai copilot)", {"These enemies are made of energy.", "Destroy them. We can collect the energy."}, 2);
+                PH(15, "", {"Tower communication restored."}, 1);
+                PH(20, "Tower (ai)", {"Shockwave cannon ready."}, 1);
+                if (score > 20) dialogueSys.history.add("Bryssa from Tower", {"A little more energy!"}, 1);
+                PH(30, "Tower (ai)", {"Defense system charged.", "More enemies incoming. Keep gathering energy."}, 2);
+                PH(40, "Ally (ai copilot)", {"Stay strong, Martha!"}, 1);
+                if (score > 40) {
+                    dialogueSys.history.add("Bryssa from Tower", {"The trainer shares energy with the base.", "You and the base will upgrade together."}, 2);
+                }
+                PH(50, "Tower (ai)", {"Keep gathering energy."}, 1);
+                PH(55, "Ally (ai copilot)", {"System checking.", "Done."}, 2);
+                PH(61, "Tower (ai)", {"Base upgraded again."}, 1);
+                if (score > 61) dialogueSys.history.add("Bryssa from Tower", {"Radar shows even more enemies! Watch out!"}, 1);
+                PH(70, "Ally (ai copilot)", {"System checking result:", "Aiming assist system on this plane.", "You shall find it somewhere."}, 3);
+                PH(80, "Ally (ai copilot)", {"I've lost contact with the tower!", "But you and the base can upgrade again soon."}, 2);
+                PH(90, "Ally (ai copilot)", {"We've gathered quite a lot of energy."}, 1);
+                PH(105, "", {"Tower communication restored."}, 1);
+                if (score > 105) {
+                    dialogueSys.history.add("Tower (ai)", {"Massive energy signature detected.", "Analyzing source..."}, 2);
+                }
+                PH(120, "Bryssa from Tower", {"It's a capital ship.", "Telamondo-class. Martha, this is what the defense system was built for."}, 2);
+                PH(160, "Tower (ai)", {"Enemy capital ship approaching.", "Entering weapons range in 40 seconds."}, 2);
+                PH(180, "Bryssa from Tower", {"Shockwave Defense System is fully charged", "Martha, just keep them off us!"}, 2);
+                PH(195, "Ally (ai copilot)", {"Here it comes...!"}, 1);
+                #undef PH
             }
             lastScore = score;
         }
@@ -4281,8 +4316,8 @@ private:
             }
             bulletMgr.decrementCooldown();
 
-            // Enable enemies after score-0 dialogue finishes
-            if (!enemiesEnabled && triggeredScores[0] && !dialogueSys.isActive())
+            // Enable enemies after score-0 dialogue finishes (Ch1 only; Ch2+ immediately)
+            if (!enemiesEnabled && (chapterMgr.getConfig().chapterNumber != 1 || (triggeredScores[0] && !dialogueSys.isActive())))
                 enemiesEnabled = true;
 
             // Spawn
@@ -4342,15 +4377,17 @@ private:
             particleMgr.update();
             shockwaveMgr.update();
             floatingTextMgr.update();
+            if (chapterMgr.getConfig().chapterNumber == 1) {
             if (!triggeredScores[0] && lastScore < 0 && score >= 0 && !dialogueSys.isActive()) {
                 triggeredScores[0] = true;
-                dialogueSys.queueDialogue("Ally", "Martha, you're the only one in the air.");
-                dialogueSys.queueDialogue("Ally", "Hold on as long as you can. The base shockwave cannon is charging.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Martha, you're the only one in the air.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Hold on as long as you can. The base shockwave cannon is charging.");
                 dialogueSys.start();
             }
             if (!triggeredScores[3] && lastScore < 3 && score >= 3 && !dialogueSys.isActive()) {
                 triggeredScores[3] = true;
-                dialogueSys.queueDialogue("Bryssa", "These enemies are made of energy. Destroy them. We can collect the energy.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "These enemies are made of energy.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Destroy them. We can collect the energy.");
                 dialogueSys.start();
             }
             if (!triggeredScores[15] && lastScore < 15 && score >= 15 && !dialogueSys.isActive()) {
@@ -4360,35 +4397,103 @@ private:
             }
             if (!triggeredScores[20] && lastScore < 20 && score >= 20 && !dialogueSys.isActive()) {
                 triggeredScores[20] = true;
-                dialogueSys.queueDialogue("Tower", "Shockwave cannon ready.");
-                dialogueSys.queueDialogue("Tower", "Just a little more energy!");
+                dialogueSys.queueDialogue("Tower (ai)", "Shockwave cannon ready.");
+                dialogueSys.queueDialogue("Bryssa from Tower", "A little more energy!");
                 dialogueSys.start();
             }
             if (!triggeredScores[30] && lastScore < 30 && score >= 30 && !dialogueSys.isActive()) {
                 triggeredScores[30] = true;
-                dialogueSys.queueDialogue("Tower", "Defense system charged.");
-                dialogueSys.queueDialogue("Tower", "More enemies incoming. Keep gathering energy.");
+                dialogueSys.queueDialogue("Tower (ai)", "Defense system charged.");
+                dialogueSys.queueDialogue("Tower (ai)", "More enemies incoming. Keep gathering energy.");
                 dialogueSys.start();
             }
             if (!triggeredScores[40] && lastScore < 40 && score >= 40 && !dialogueSys.isActive()) {
                 triggeredScores[40] = true;
-                dialogueSys.queueDialogue("Ally", "Stay strong, Martha!");
-                dialogueSys.queueDialogue("Bryssa", "The trainer shares energy with the base.");
-                dialogueSys.queueDialogue("Bryssa", "You and the base will upgrade together.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Stay strong, Martha!");
+                dialogueSys.queueDialogue("Bryssa from Tower", "The trainer shares energy with the base.");
+                dialogueSys.queueDialogue("Bryssa from Tower", "You and the base will upgrade together.");
                 dialogueSys.start();
             }
             if (!triggeredScores[50] && lastScore < 50 && score >= 50 && !dialogueSys.isActive()) {
                 triggeredScores[50] = true;
-                dialogueSys.queueDialogue("Tower", "Keep gathering energy.");
-                dialogueSys.queueDialogue("Ally", "We believe in you.");
+                dialogueSys.queueDialogue("Tower (ai)", "Keep gathering energy.");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[55] && lastScore < 55 && score >= 55 && !dialogueSys.isActive()) {
+                triggeredScores[55] = true;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "System checking.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Done.");
                 dialogueSys.start();
             }
             if (!triggeredScores[61] && lastScore < 61 && score >= 61 && !dialogueSys.isActive()) {
                 triggeredScores[61] = true;
-                dialogueSys.queueDialogue("Tower", "Base upgraded again.");
-                dialogueSys.queueDialogue("Tower", "Radar shows even more enemies.");
+                dialogueSys.queueDialogue("Tower (ai)", "Base upgraded again.");
+                dialogueSys.queueDialogue("Bryssa from Tower", "Radar shows even more enemies! Watch out!");
                 dialogueSys.start();
             }
+            if (!triggeredScores[70] && lastScore < 70 && score >= 70 && !dialogueSys.isActive()) {
+                triggeredScores[70] = true;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "System checking result:");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Aiming assist system on this plane.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "You shall find it somewhere.");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[80] && lastScore < 80 && score >= 80 && !dialogueSys.isActive()) {
+                triggeredScores[80] = true;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "I've lost contact with the tower!");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "But you and the base can upgrade again soon.");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[90] && lastScore < 90 && score >= 90 && !dialogueSys.isActive()) {
+                triggeredScores[90] = true;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "We've gathered quite a lot of energy.");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[105] && lastScore < 105 && score >= 105 && !dialogueSys.isActive()) {
+                triggeredScores[105] = true;
+                dialogueSys.queueDialogue("", "Tower communication restored.");
+                dialogueSys.queueDialogue("Tower (ai)", "Massive energy signature detected.");
+                dialogueSys.queueDialogue("Tower (ai)", "Analyzing source...");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[120] && lastScore < 120 && score >= 120 && !dialogueSys.isActive()) {
+                triggeredScores[120] = true;
+                dialogueSys.queueDialogue("Bryssa from Tower", "It's a capital ship.");
+                dialogueSys.queueDialogue("Bryssa from Tower", "Telamondo-class. Martha, this is what the defense system was built for.");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[160] && lastScore < 160 && score >= 160 && !dialogueSys.isActive()) {
+                triggeredScores[160] = true;
+                dialogueSys.queueDialogue("Tower (ai)", "Enemy capital ship approaching.");
+                dialogueSys.queueDialogue("Tower (ai)", "Entering weapons range in 40 seconds.");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[180] && lastScore < 180 && score >= 180 && !dialogueSys.isActive()) {
+                triggeredScores[180] = true;
+                dialogueSys.queueDialogue("Bryssa from Tower", "Shockwave Defense System is fully charged");
+                dialogueSys.queueDialogue("Bryssa from Tower", "Martha, just keep them off us!");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[195] && lastScore < 195 && score >= 195 && !dialogueSys.isActive()) {
+                triggeredScores[195] = true;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Here it comes...!");
+                dialogueSys.start();
+            }
+            if (!triggeredScores[210] && lastScore < 210 && score >= 210 && !dialogueSys.isActive()) {
+                triggeredScores[210] = true;
+                dialogueSys.queueDialogue("Bryssa from Tower", "Base defense systems are strengthening.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Firepower systems being enhanced.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Martha, full assault!");
+                dialogueSys.start();
+            }
+            if (bossPhase2DialogueTriggered && !dialogueSys.isActive()) {
+                bossPhase2DialogueTriggered = false;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Telamondo can absorb energy!");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Our firepower can match it!");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Keep up the full assault!");
+                dialogueSys.start();
+            }
+            } // chapter 1 dialogue triggers
             lastScore = score;
             dialogueSys.update(false);  // no ENTER skip for dialogue
             int ticks = dialogueSys.popTicks();
@@ -4409,6 +4514,7 @@ private:
                 boss.triggerPhase2();
                 phase = PHASE_BOSS_PHASE2;
                 alienMgr.setAllInvincible();
+                bossPhase2DialogueTriggered = true;
             }
 
             // ======== PHASE_BOSS_INTRO ========
@@ -5220,7 +5326,7 @@ private:
                 narration.queue("At the same moment,\na series of massive explosions behind her.\nShe turns --");
                 narration.queue("All fighters become wreckage.");
                 narration.queue("Martha runs back to the hangar.\nOnly one old trainer left.");
-                narration.queue("Into the cockpit. Engines up.\nShe reports:\n\"I'm taking off. Flight code:B295\"");
+                narration.queue("Into the cockpit. Engines up.\nShe reports:\n\"I'm taking off. Flight code:21395\"");
                 narration.queue("Martha heads into space.");
                 narration.queue("No answer from the tower.\nOnly a sharp, harsh noise.");
                 break;

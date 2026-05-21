@@ -18,17 +18,20 @@ Control your starfighter in a massive space, shoot down alien ships, survive wav
 
 > macOS 11.0+
 
-[Download v1.2.14](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.14) (latest)
+[Download v1.2.15](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.15) (latest)
 
 Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.14)
+## What's New / 最近更新 (v1.2.15)
 
-- **全新开幕旁白！** 第一章现在有一段完整的开场故事——Martha通过最终考核成为Huntress，基地突然遇袭，主力战机全毁，她开着一架老教练机孤身升空。打字机特效逐字展开，Mario式弹性弹出动画，暗绿色夜精灵风格文本框，滴滴答答的电报音效——还没开打就已经燃起来了！按ENTER推进剧情，按ESC直接跳过开打，你说了算。
-- **实时队友对话系统！** Ally、Bryssa、Tower 三位战友全程在线，8个关键分数点精准触发——刚起飞有人喊加油，3分有人教你打能量体，15分塔台恢复通讯，20分防御炮就位……打到61分还有新对话！名字标签+暗绿文字在画面左侧浮现，打完自动上浮消失，完全不挡视线。重点是——**暂停菜单里能翻对话历史了！** 按暂停切到右半区，所有已经触发的对话一字排开，上下滚动回看，焦点移动顺滑得像翻聊天记录，长句子自动折行整整齐齐。漏了什么话？回来翻就是了！
-- **代码重构 + Bug 修复！** 臃肿的旁白系统已拆成三个精悍小队（NarrationSystem / DialogueSystem / DialogueHistory），各司其职，后续加对话更容易。Boss 蓝色追踪弹不会再抽风变成白色横弹了。所有菜单光标都不会再鬼畜回绕——到顶就停，原路返回。
+- **对话系统大爆发！** 第一章新增 13 个分数触发点（55/70/80/90/105/120/160/180/195/210），从 Ally 的系统自检、塔台重新失联，到 Bryssa 侦测到 Telamondo 级主力舰逼近——完整叙事弧线一气呵成，打到 210 分还在推进剧情！Boss 半血进二阶段时更有专属对话弹出："Telamondo can absorb energy!"，战斗信息无缝融入对话系统。
+- **角色身份升级！** Ally、Bryssa、Tower 三人现在带有身份标签——Ally (ai copilot) 是机载AI副驾驶，Tower (ai) 是基地塔台AI，Bryssa from Tower 是塔台的人类通讯官。三人的声音层次分明，不再只是三个名字。
+- **中文剧本同步！** 所有新增对话的中英文版本完整写入旁白脚本（narration_scripts.txt），策划文案一步到位，后续版本直接取用。
+- **测试模式历史预填充！** 从任意分数进入测试模式，低于该分数的所有对话自动写入暂停页历史日志。选 180 分进入？前面 0~160 分的全部对话一字排开随便翻——开发调试和剧情回顾的神器。
+- **章节守卫机制！** 第一章对话只在第一章触发，第二章从 0 分重新开始不会串戏。Boss 二阶段对话也归入统一触发区块，所有对话代码集中管理，不再散落各处。
+- **细节打磨：** 开幕旁白 Flight code 更正为 21395；小写 g 字型重新设计，碗部饱满降部利落；triggeredScores 数组扩容到 256 迎接更高分。
 
 ## Build from Source / 从源码编译
 
@@ -49,7 +52,7 @@ Requires SDL2: `brew install sdl2`
 │   ├── space_shooting ver1.0.0.cpp
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
-└── v2.0.0/                                     # 当前开发主线 (v1.2.10)
+└── v2.0.0/                                     # 当前开发主线 (v1.2.15)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
     └── Release Version/                          # 发布版本
@@ -62,7 +65,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.9.app/ + .zip                   # v1.2.9
         ├── Shooter ver1.2.10.app/ + .zip                  # v1.2.10
         ├── Shooter ver1.2.11.app/ + .zip                  # v1.2.11
-        └── Shooter ver1.2.14.app/ + .zip                  # v1.2.14 (最新)
+        ├── Shooter ver1.2.14.app/ + .zip                  # v1.2.14
+        └── Shooter ver1.2.15.app/ + .zip                  # v1.2.15 (最新)
 ```
 
 ## License

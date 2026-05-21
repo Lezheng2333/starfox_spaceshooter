@@ -572,9 +572,9 @@ public:
         playSound(1400, 0, 16, 0.09f, 0, 2);   // sine tap for "snap"
     }
     void sndExplosionBig()   {
-        playSound(500, 0, 48, 0.19f, 2, 2);    // layered high noise
-        playSound(200, 0, 40, 0.14f, 2, 1);    // mid noise fill
-        playSound(1800, 400, 22, 0.10f, 3, 2); // quick high sweep (shattering)
+        playSound(500, 0, 48, 0.12f, 2, 2);    // layered high noise
+        playSound(200, 0, 40, 0.09f, 2, 1);    // mid noise fill
+        playSound(1800, 400, 22, 0.07f, 3, 2); // quick high sweep (shattering)
     }
     void sndShockwave() { playSound(60, 150, 250, 0.30f, 3, 0); }
     void sndShockwaveHit()   { playSound(100, 0, 60, 0.25f, 0, 1); }
@@ -592,7 +592,7 @@ public:
         playSound(280, 0, 28, 0.20f, 1, 2);
         playSound(80, 0, 35, 0.28f, 1, 0);
     }
-    void sndShake()   { playSound(35, 0, 100, 0.22f, 2, 0); }
+    void sndShake()   { playSound(35, 0, 80, 0.12f, 2, 0); }
     void sndCrystalCrush() {
         playSound(2200, 500, 24, 0.15f, 1, 1);   // square sweep: 8-bit crystal shatter
         playSound(800, 0, 18, 0.12f, 3, 2);      // noise crunch: impact texture
@@ -603,6 +603,10 @@ public:
         playSound(500, 0, 12, 0.05f, 0, 1);       // low sine body: radio depth
     }
     void sndTeletype()  { playSound(2400, 1800, 20, 0.10f, 3, 2); }
+    void sndAllyTalk()  { playSound(3200, 2200, 14, 0.07f, 0, 2); }  // AI copilot: high sine blip
+    void sndTowerTalk() { playSound(800, 400, 16, 0.08f, 3, 1); }   // tower AI: mid sweep
+    void sndBryssaTalk(){ playSound(1500, 600, 12, 0.07f, 1, 2); }  // human comms: mid-high square
+    void sndSystemTalk(){ playSound(1000, 0, 10, 0.05f, 0, 2); }    // system msg: pure sine ping
     void sndPlayerHit() { // heavy damage impact
         playSound(80, 0, 55, 0.22f, 2, 0);    // low thud
         playSound(200, 0, 40, 0.16f, 1, 1);   // mid impact
@@ -850,6 +854,11 @@ public:
 
     bool isActive() const { return active; }
     int popTicks() { int n = ticks; ticks = 0; return n; }
+    const std::string& currentSpeaker() const {
+        static std::string none;
+        if (!active || idx >= (int)queue.size()) return none;
+        return queue[idx].speaker;
+    }
 
     void reset() {
         queue.clear(); idx = 0; active = false; enterWas = false; ticks = 0;
@@ -866,7 +875,13 @@ public:
         switch (l.state) {
             case 1: // Pop-in
                 l.timer++;
-                if (skip || l.timer >= POPUP_FRAMES) { l.state = 2; l.timer = 0; }
+                if (skip || l.timer >= POPUP_FRAMES) {
+                    l.state = 2; l.timer = 0;
+                    if (!l.historyRecorded) {
+                        l.historyRecorded = true;
+                        history.add(l.speaker, l.vlines, l.numLines);
+                    }
+                }
                 break;
             case 2: // Typewriter
                 if (l.revealed < totalChars) {
@@ -883,10 +898,6 @@ public:
                 double t = (double)l.timer / FADE_FRAMES;
                 l.y = l.fadeStartY - (float)(50.0 * (1.0 - std::pow(1.0 - t, 3.0)));
                 if (skip || l.timer >= FADE_FRAMES) {
-                    if (!l.historyRecorded) {
-                        l.historyRecorded = true;
-                        history.add(l.speaker, l.vlines, l.numLines);
-                    }
                     idx++;
                     if (idx >= (int)queue.size()) { active = false; enterWas = enterPressed; return; }
                     auto& next = queue[idx];
@@ -2180,7 +2191,7 @@ public:
             shakeTimer--;
             shakeX = (rand() % 10) - 5;
             shakeY = (rand() % 10) - 5;
-            if (shakeTimer % 8 == 0 && audio) audio->sndShake();
+            if (shakeTimer % 12 == 0 && audio) audio->sndShake();
         } else { shakeX = shakeY = 0; }
     }
 
@@ -2188,7 +2199,7 @@ public:
         if (postAbsorbTimer > 0) {
             postAbsorbTimer--;
             shakeX = (rand() % 10) - 5; shakeY = (rand() % 10) - 5;
-            if (postAbsorbTimer % 6 == 0 && audio) audio->sndShake();
+            if (postAbsorbTimer % 10 == 0 && audio) audio->sndShake();
         }
     }
 
@@ -3865,7 +3876,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.15", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.16", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -4497,7 +4508,14 @@ private:
             lastScore = score;
             dialogueSys.update(false);  // no ENTER skip for dialogue
             int ticks = dialogueSys.popTicks();
-            while (ticks-- > 0) audio.sndTeletype();
+            const std::string& spk = dialogueSys.currentSpeaker();
+            while (ticks-- > 0) {
+                if (spk.find("Ally") != std::string::npos) audio.sndAllyTalk();
+                else if (spk.find("Bryssa") != std::string::npos) audio.sndBryssaTalk();
+                else if (spk.find("Tower") != std::string::npos) audio.sndTowerTalk();
+                else if (spk.empty()) audio.sndSystemTalk();
+                else audio.sndTeletype();
+            }
 
             // Ch1Boss movement
             if (phase == PHASE_BOSS_FIGHT || phase == PHASE_BOSS_PHASE2) {

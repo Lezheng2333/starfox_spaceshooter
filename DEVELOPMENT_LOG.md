@@ -654,3 +654,19 @@ Ver 1.0.1 | 2026-05-08
       非分数触发归入统一对话区块，所有对话代码集中管理
     - triggeredScores 数组扩容：64 → 256，支持 200+ 分数对话
     - 字体 g 字型重新设计：(0x00/0F/11/0F/01/19/0F) 顶部留空、碗部饱满、降部左勾
+
+  Ver 1.2.16 | 角色对话音效 + Boss 震爆音量修复
+    - 角色专用对话音效：
+      - Ally (ai copilot): 高频正弦 blip（3200→2200Hz），AI 助理感
+      - Tower (ai): 中低频 noise sweep（800→400Hz），塔台无线电感
+      - Bryssa from Tower: 中高频方波 sweep（1500→600Hz），人类通讯官
+      - 系统消息 (空 speaker): 纯正弦 ping（1000Hz），系统提示
+      - 开幕旁白保持原 sndTeletype() 音效不受影响
+      - DialogueSystem 新增 currentSpeaker() 方法，按角色名自动匹配音效
+    - 对话历史即时写入：pop-in 动画结束后立即写入 history，
+      不再等到整条对话上浮消失才记录
+    - BUGFIX: Bryssa 对话匹配到 Tower 音效 — "Bryssa from Tower" 包含 "Tower"
+      导致 Bryssa 优先匹配错误，调整 if-else 顺序修复
+    - BUGFIX: Boss 二阶段震动/爆炸音效过大、不受音量控制 —
+      sndShake 音量 0.22→0.12、时长 100→80ms、触发间隔放宽；
+      sndExplosionBig 三层音量分别降低（0.19/0.14/0.10 → 0.12/0.09/0.07）

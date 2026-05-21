@@ -18,20 +18,17 @@ Control your starfighter in a massive space, shoot down alien ships, survive wav
 
 > macOS 11.0+
 
-[Download v1.2.15](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.15) (latest)
+[Download v1.2.16](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.16) (latest)
 
 Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.15)
+## What's New / 最近更新 (v1.2.16)
 
-- **对话系统大爆发！** 第一章新增 13 个分数触发点（55/70/80/90/105/120/160/180/195/210），从 Ally 的系统自检、塔台重新失联，到 Bryssa 侦测到 Telamondo 级主力舰逼近——完整叙事弧线一气呵成，打到 210 分还在推进剧情！Boss 半血进二阶段时更有专属对话弹出："Telamondo can absorb energy!"，战斗信息无缝融入对话系统。
-- **角色身份升级！** Ally、Bryssa、Tower 三人现在带有身份标签——Ally (ai copilot) 是机载AI副驾驶，Tower (ai) 是基地塔台AI，Bryssa from Tower 是塔台的人类通讯官。三人的声音层次分明，不再只是三个名字。
-- **中文剧本同步！** 所有新增对话的中英文版本完整写入旁白脚本（narration_scripts.txt），策划文案一步到位，后续版本直接取用。
-- **测试模式历史预填充！** 从任意分数进入测试模式，低于该分数的所有对话自动写入暂停页历史日志。选 180 分进入？前面 0~160 分的全部对话一字排开随便翻——开发调试和剧情回顾的神器。
-- **章节守卫机制！** 第一章对话只在第一章触发，第二章从 0 分重新开始不会串戏。Boss 二阶段对话也归入统一触发区块，所有对话代码集中管理，不再散落各处。
-- **细节打磨：** 开幕旁白 Flight code 更正为 21395；小写 g 字型重新设计，碗部饱满降部利落；triggeredScores 数组扩容到 256 迎接更高分。
+- **角色对话音效！** Ally、Bryssa、Tower 三位战友现在各有专属打字音效——Ally (ai copilot) 是清脆的高频正弦 blip，像机载AI在耳机里滴滴答答；Tower (ai) 是低沉的中低频 noise sweep，像塔台无线电的沙沙声；Bryssa from Tower 是中高频方波 sweep，人类通讯官的声音温暖而有力量。开幕旁白的经典电报音效保持原样。暂停翻对话历史的时候不会再听到音效——只有实时的游戏内对话才会出声。
+- **对话历史即时写入！** 以前要等对话完全上浮消失才能翻看历史，现在对话一开始弹出就立刻写进暂停页历史日志——暂停随时翻，一句都不会漏。
+- **Boss 震爆音量修复！** 二阶段震动音效和 Boss 爆炸音效之前过于震耳且不受音量设置约束，现已全面调低——震动音量从 0.22 降到 0.12、时长缩短、触发间隔放宽；三层爆炸音效同步降低，整体音量和谐可控。
 
 ## Build from Source / 从源码编译
 
@@ -52,7 +49,7 @@ Requires SDL2: `brew install sdl2`
 │   ├── space_shooting ver1.0.0.cpp
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
-└── v2.0.0/                                     # 当前开发主线 (v1.2.15)
+└── v2.0.0/                                     # 当前开发主线 (v1.2.16)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
     └── Release Version/                          # 发布版本
@@ -66,7 +63,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.10.app/ + .zip                  # v1.2.10
         ├── Shooter ver1.2.11.app/ + .zip                  # v1.2.11
         ├── Shooter ver1.2.14.app/ + .zip                  # v1.2.14
-        └── Shooter ver1.2.15.app/ + .zip                  # v1.2.15 (最新)
+        ├── Shooter ver1.2.15.app/ + .zip                  # v1.2.15
+        └── Shooter ver1.2.16.app/ + .zip                  # v1.2.16 (最新)
 ```
 
 ## License

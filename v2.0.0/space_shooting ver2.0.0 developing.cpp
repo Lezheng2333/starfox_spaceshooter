@@ -1356,17 +1356,16 @@ public:
 
         if (moveLeft)  x -= hStep;
         if (moveRight) x += hStep;
-        if (moveUp)    y -= vStep;
-        if (moveDown)  y += vStep;
-
-        // Clamp y first, then clamp x to perspective boundary at that y
-        if (y < 220) y = 220;
-        if (y > WIN_HEIGHT - 30) y = WIN_HEIGHT - 30;
 
         double minX = perspLeft(y) + 18;
         double maxX = perspRight(y) - 18;
         if (x < minX) x = (int)minX;
         if (x > maxX) x = (int)maxX;
+
+        if (moveUp)    y -= vStep;
+        if (moveDown)  y += vStep;
+        if (y < 220) y = 220;
+        if (y > WIN_HEIGHT - 30) y = WIN_HEIGHT - 30;
 
         int curDir = 0;
         if (moveRight && !moveLeft) curDir = 1;
@@ -1530,7 +1529,7 @@ public:
         b.startX = pl.getX(); b.startY = pl.getY();
         b.dx = dirX / len; b.dy = dirY / len;
         b.active = true; b.canDamage = true;
-        b.blueBeam = false; b.beamTargetIndex = -1;
+        b.sideScroll = false; b.blueBeam = false; b.beamTargetIndex = -1;
         bullets.push_back(b);
         if (audio) audio->sndShoot();
     }

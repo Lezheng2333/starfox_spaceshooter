@@ -670,3 +670,22 @@ Ver 1.0.1 | 2026-05-08
     - BUGFIX: Boss 二阶段震动/爆炸音效过大、不受音量控制 —
       sndShake 音量 0.22→0.12、时长 100→80ms、触发间隔放宽；
       sndExplosionBig 三层音量分别降低（0.19/0.14/0.10 → 0.12/0.09/0.07）
+
+  Ver 1.2.17 | 结束页面重设计 + 透视速度 + 第二章开幕旁白 + BGM优化
+    - 结束页面（Mission Complete）重设计：
+      - MISSION COMPLETE 用旁白风格墨绿文本框展示
+      - 两个菜单选项居中显示：NEXT CHAPTER / BACK TO MAIN MENU
+      - 光标改为黄色下划线；NEXT CHAPTER 直接进入下一章开幕旁白
+    - 第一章透视移动优化：
+      - 移动速度随高度缩放（speedFactor = perspWidth(y)/perspWidth(400)）
+      - 靠近地平线速度慢（~0.7x），靠近下端速度快（~1.3x），中间保持默认
+    - 暂停页面优化：右半区域新增 "HISTORY DIALOGUE" 白色标题，与 PAUSED 同高
+    - 开始页面和暂停页面取消 BGM；预留 setStartBgm() 接口
+    - 第二章开幕旁白完整重写（12页），文学性氛围感大幅提升
+    - 对话单行最大长度 38→20 字符，紧凑显示
+    - 开幕旁白细节修正：Flight code B295→21395，Huntress 措辞优化
+    - 字体库补充小写 q（p 的镜像对称），所有 ASCII 可打印字符完整
+    - BUGFIX: 第一章子弹横飞 — 透视移动中 x 重赋值与 getT() 不一致，
+      简化为独立 x/y 移动+速度缩放，移除透视线保持逻辑
+    - BUGFIX: 第二章背景玻璃在画面内刷新 — genAhead 预生成边距 300→600，
+      星点 wrap 边距 200→400

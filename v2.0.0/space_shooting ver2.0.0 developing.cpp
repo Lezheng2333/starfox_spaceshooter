@@ -239,6 +239,7 @@ public:
         setChar('n', "\x00\x00\x1E\x11\x11\x11\x11");
         setChar('o', "\x00\x00\x0E\x11\x11\x11\x0E");
         setChar('p', "\x00\x00\x1E\x11\x11\x1E\x10");
+        setChar('q', "\x00\x00\x0F\x11\x11\x0F\x01");
         setChar('r', "\x00\x00\x16\x19\x10\x10\x10");
         setChar('s', "\x00\x00\x0E\x10\x0E\x01\x1E");
         setChar('t', "\x08\x08\x1C\x08\x08\x09\x06");
@@ -365,6 +366,7 @@ class AudioEngine {
     int bgmVolume, sfxVolume, eqLow, eqMid, eqHigh;
     bool bossMusicOn;
     volatile bool ch2Bgm;
+    volatile bool bgmOff;       // silence BGM on start/pause screens
     std::vector<ActiveSound> activeSnd;
 
     // BGM state
@@ -398,6 +400,7 @@ class AudioEngine {
         bool bossFight = bossMusicOn;
         bool isCh2 = ch2Bgm && !bossFight;
 
+        if (!bgmOff) {
         if (isCh2) {
             // ======== Chapter 2 BGM: Ambient pad style, ~60 BPM, C# major ========
             const int CH2_TICK = 700;
@@ -486,6 +489,7 @@ class AudioEngine {
                 bgmStepCounter++;
             }
         }
+        } // !bgmOff
 
         float eqGain[3];
         eqGain[0] = std::pow(10.0f, eqLow  / 20.0f);
@@ -530,7 +534,7 @@ class AudioEngine {
 public:
     AudioEngine() : audioDev(0), bgmVolume(7), sfxVolume(7),
                     eqLow(0), eqMid(0), eqHigh(0), bossMusicOn(false),
-                    ch2Bgm(false),
+                    ch2Bgm(false), bgmOff(false),
                     bgmPhase(0), bgmPulsePhase(0), bgmStepCounter(0),
                     bgmNoteIndex(0), bgmNoteFreq(0), bgmNoteLen(0),
                     ch2BassIdx(0), ch2BassLen(0), ch2BassFreq(0), ch2BassPhase(0) {
@@ -550,6 +554,8 @@ public:
 
     void setBossMusic(bool on) { bossMusicOn = on; }
     void setCh2Bgm(bool on) { ch2Bgm = on; }
+    void setBgmOff(bool off) { bgmOff = off; }
+    void setStartBgm(bool on) { /* placeholder: start screen BGM interface */ (void)on; }
 
     void playSound(float freq, float sweepEnd, int durMs, float vol, int type, int band) {
         if (!audioDev) return;
@@ -800,7 +806,7 @@ class DialogueSystem {
 
     static const int POPUP_FRAMES = 15;
     static const int FADE_FRAMES = 40;
-    static const int WRAP_CHARS = 38;
+    static const int WRAP_CHARS = 20;
     static const int TYPE_SPEED = 2;
 
     static double marioEase(double t) {
@@ -1341,18 +1347,26 @@ public:
         bool moveUp    = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
         bool moveDown  = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
 
-        if (moveLeft)  x -= 7;
-        if (moveRight) x += 7;
+        // Perspective speed scaling: slower near horizon, faster near bottom
+        const double REF_Y = 400.0;
+        double refWidth = perspWidth(REF_Y);
+        double speedFactor = perspWidth(y) / (refWidth > 0 ? refWidth : 1.0);
+        int hStep = (int)(7.0 * speedFactor + 0.5);
+        int vStep = (int)(6.0 * speedFactor + 0.5);
+
+        if (moveLeft)  x -= hStep;
+        if (moveRight) x += hStep;
+        if (moveUp)    y -= vStep;
+        if (moveDown)  y += vStep;
+
+        // Clamp y first, then clamp x to perspective boundary at that y
+        if (y < 220) y = 220;
+        if (y > WIN_HEIGHT - 30) y = WIN_HEIGHT - 30;
 
         double minX = perspLeft(y) + 18;
         double maxX = perspRight(y) - 18;
         if (x < minX) x = (int)minX;
         if (x > maxX) x = (int)maxX;
-
-        if (moveUp)   y -= 6;
-        if (moveDown) y += 6;
-        if (y < 220) y = 220;
-        if (y > WIN_HEIGHT - 30) y = WIN_HEIGHT - 30;
 
         int curDir = 0;
         if (moveRight && !moveLeft) curDir = 1;
@@ -2629,7 +2643,7 @@ private:
     }
 
     void genAhead() {
-        double ahead = scrollX + WIN_WIDTH + 300.0; // enough margin for glass+pilars
+        double ahead = scrollX + WIN_WIDTH + 600.0; // margin: generate well off-screen to avoid visible pop-in
         // Pillars
         while (genNext < ahead) {
             pillars.push_back({genNext, (int)(genNext / PILLAR_SPACING) % 5 == 0});
@@ -2666,8 +2680,8 @@ private:
     }
 
     void pruneStars() {
-        double cutoff = scrollX * STAR_PARALLAX - 200.0;
-        double wrap = scrollX * STAR_PARALLAX + WIN_WIDTH + 200.0;
+        double cutoff = scrollX * STAR_PARALLAX - 400.0;
+        double wrap = scrollX * STAR_PARALLAX + WIN_WIDTH + 400.0;
         for (auto& s : stars) {
             if (s.wx < cutoff) { s.wx += 6000.0; s.phase = (rand() % 628) / 100.0f; }
             if (s.wx > wrap) { s.wx -= 6000.0; }
@@ -3631,6 +3645,7 @@ class Game {
     int bossDefeatTimer, defeatAlienTimer, defeatReturnTimer, defeatFWTimer;
     int defeatMCDelay, defeatFadeTimer;
     bool missionCompleteShown, missionComplete;
+    int mcMenuSelection;
 
     // Chapter unlock tracking
     bool isNormalPlay;
@@ -3671,7 +3686,7 @@ public:
           countdown(-1), countdownFrame(0), soundCursor(0),
           bossDefeatTimer(0), defeatAlienTimer(0), defeatReturnTimer(0), defeatFWTimer(0),
           defeatMCDelay(0), defeatFadeTimer(0),
-          missionCompleteShown(false), missionComplete(false),
+          missionCompleteShown(false), missionComplete(false), mcMenuSelection(0),
           isNormalPlay(false),
           wallFlashTimer(0), wallContactY(0), wallAnimFrame(0),
           ch2PlayerHP(3), ch2GameOver(false),
@@ -3721,7 +3736,7 @@ public:
         memset(triggeredScores, 0, sizeof(triggeredScores)); baseFireTimer = 0; lastScore = -1; enemiesEnabled = false;
         phase = PHASE_PLAY;
         paused = false;
-        missionComplete = false; missionCompleteShown = false;
+        missionComplete = false; missionCompleteShown = false; mcMenuSelection = 0;
         wallFlashTimer = 0; wallContactY = 0; wallAnimFrame = 0;
         ch2AlienMgr.reset(); dmMgr.reset(); dmFireCooldown = 0;
         bossDefeatTimer = 0; defeatAlienTimer = 0; defeatReturnTimer = 0;
@@ -3746,6 +3761,7 @@ public:
 
             const Uint8* keys = SDL_GetKeyboardState(NULL);
             audio.setBossMusic(phase == PHASE_BOSS_FIGHT && boss.isActive());
+            audio.setBgmOff(atStartScreen || paused);
             audio.setCh2Bgm(chapterMgr.getConfig().isSideScrolling &&
                 !atStartScreen && !atChapterSelect && !atTestSelect && !atOptionScreen && !atSoundMenu && !gameOver);
             if (background) background->update();
@@ -3876,7 +3892,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.16", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.17", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -4760,12 +4776,31 @@ private:
         }
 
         if (missionComplete) {
+            bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
+            bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
             bool enterNow = keys[SDL_SCANCODE_RETURN];
-            static bool enterWasM = false;
+            static bool upWasM = false, downWasM = false, enterWasM = false;
+            if (upNow && !upWasM && mcMenuSelection > 0) mcMenuSelection--;
+            if (downNow && !downWasM && mcMenuSelection < 1) mcMenuSelection++;
             if (enterNow && !enterWasM) {
-                resetGame(); atStartScreen = true;
+                if (mcMenuSelection == 0) {
+                    int cur = chapterMgr.getCurrentIndex();
+                    if (cur < 4) {
+                        chapterMgr.selectChapter(cur + 1);
+                        resetGame();
+                        isNormalPlay = true;
+                        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+                        bulletMgr.updateParams(0);
+                        shockwaveMgr.updateParams(0);
+                        startChapterNarration();
+                    } else {
+                        resetGame(); atStartScreen = true;
+                    }
+                } else {
+                    resetGame(); atStartScreen = true;
+                }
             }
-            enterWasM = enterNow;
+            upWasM = upNow; downWasM = downNow; enterWasM = enterNow;
         }
 
         particleMgr.removeInactive();
@@ -5136,12 +5171,15 @@ private:
         font.drawString(r, "A/D:switch  W/S:menu  ENTER:confirm", 30, 480, 2);
 
         // === Right half: dialogue history ===
+        const int RX = 420;
+        font.drawString(r, "HISTORY DIALOGUE", RX, 100, 3);
+
         auto& hist = dialogueSys.history;
         int total = (int)hist.size();
         if (total == 0) return;
 
         const int CH_W = 12, CH_H = 14;
-        const int RX = 420, RY_TOP = 160;
+        const int RY_TOP = 160;
         const int LINE_GAP = 14;  // one blank line between blocks
         const int TR = 50, TG = 155, TB = 70;
         const int SR = 180, SG = 200, SB = 160;
@@ -5312,21 +5350,40 @@ private:
         SDL_Rect dr = {0, 0, WIN_WIDTH, WIN_HEIGHT};
         SDL_RenderFillRect(r, &dr);
         if (fadeAlpha > 160) {
-            SDL_SetRenderDrawColor(r, 255, 255, 50, 255);
-            int cx1 = CENTER_X - 204;
-            for (const char* p = "MISSION COMPLETE"; *p; ++p) {
-                if (*p != ' ') font.drawChar(r, *p, cx1, 220, 4);
-                cx1 += 6 * 4;
+            const int TR = 50, TG = 155, TB = 70;
+            // Narration-style text box
+            const char* title = "MISSION COMPLETE";
+            int titleLen = (int)strlen(title);
+            int titleW = titleLen * 18 + 50;
+            int titleH = 21 + 40;
+            int boxX = CENTER_X - titleW / 2, boxY = 200;
+            // Background
+            SDL_SetRenderDrawColor(r, 10, 25, 15, 220);
+            SDL_Rect bgRect = {boxX, boxY, titleW, titleH};
+            SDL_RenderFillRect(r, &bgRect);
+            SDL_SetRenderDrawColor(r, TR, TG, TB, 180);
+            SDL_RenderDrawRect(r, &bgRect);
+            // Title text
+            SDL_SetRenderDrawColor(r, TR, TG, TB, 255);
+            int tx = boxX + 25;
+            for (const char* p = title; *p; ++p) {
+                if (*p != ' ') font.drawChar(r, *p, tx, boxY + 22, 3);
+                tx += 18;
             }
-            int cx2 = CENTER_X - 48;
-            for (const char* p = "EXIT"; *p; ++p) {
-                if (*p != ' ') font.drawChar(r, *p, cx2, 340, 4);
-                cx2 += 6 * 4;
+            // Menu options
+            const int MENU_Y = 310, MENU_GAP = 40;
+            const char* items[2] = {"NEXT CHAPTER", "BACK TO MAIN MENU"};
+            for (int i = 0; i < 2; ++i) {
+                int iy = MENU_Y + i * MENU_GAP;
+                SDL_SetRenderDrawColor(r, TR, TG, TB, (i == mcMenuSelection) ? 255 : 140);
+                int itemW = (int)strlen(items[i]) * 12; // scale=2, charW=6*2
+                int ix = CENTER_X - itemW / 2;
+                font.drawString(r, items[i], ix, iy, 2);
+                if (i == mcMenuSelection) {
+                    SDL_SetRenderDrawColor(r, 255, 255, 0, 200);
+                    SDL_RenderDrawLine(r, ix, iy + 20, ix + itemW, iy + 20);
+                }
             }
-            UIRenderer::drawMenuCursor(r, CENTER_X - 70, 350, 12);
-            UIRenderer::drawMenuUnderline(r, CENTER_X - 48, 374, 96);
-            SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
-            font.drawString(r, "ENTER:return to title", CENTER_X - 150, 490, 2);
         }
     }
 
@@ -5336,22 +5393,34 @@ private:
         int ch = chapterMgr.getCurrentIndex();
         switch (ch) {
             case 0:
-                narration.queue("Stellar Calendar 24th\nIn the deep space.\nThe \"Life\" base.");
-                narration.queue("Martha aces her final test.\nShe's now a \"Huntress\".");
+                narration.queue("Stellar Calendar 24th.\nIn the deep space.\nThe \"Life\" base.");
+                narration.queue("Martha aces her final test.\nShe's now a member of \"Huntress\".");
                 narration.queue("When she is just off the plane.\nHeading for the rest area.\nAnnouncement sounds.");
                 narration.queue("Tower: \"Hostile objects approaching!\nAll fighters scramble!\"");
                 narration.queue("\"Repeat: Scramble! Scramble!\"");
                 narration.queue("At the same moment,\na series of massive explosions behind her.\nShe turns --");
-                narration.queue("All fighters become wreckage.");
+                narration.queue("All fighters become wreckage...");
                 narration.queue("Martha runs back to the hangar.\nOnly one old trainer left.");
                 narration.queue("Into the cockpit. Engines up.\nShe reports:\n\"I'm taking off. Flight code:21395\"");
-                narration.queue("Martha heads into space.");
-                narration.queue("No answer from the tower.\nOnly a sharp, harsh noise.");
+                narration.queue("No response from the tower.\nOnly a sharp, harsh noise.");
+                narration.queue("Martha heads into space.\nAgain and alone.");
                 break;
             case 1:
-                narration.queue("CH.2  DEEP SPACE");
-                narration.queue("The battle rages on in the void.");
-                narration.queue("Navigate the corridor and survive.");
+                narration.queue("A hard-won victory. But the cost is plain.\nThe \"Life\" base lies scarred and broken.\nRepairs will take weeks.");
+                narration.queue("The shockwave defense system,\npushed far beyond its limits,\nneeds a full overhaul\nbefore it can fire again.");
+                narration.queue("The base's long-range comms array\nis destroyed.\nMartha must fly to the\n\"Moonwell\" R&D center,\nwith Bryssa in her backseat,\nto bring home new equipment.");
+                narration.queue("Ally enters its standby mode.\nBryssa, exhausted, drifts off.\nThe old trainer's engine hums\na tired, weary vibration.");
+                narration.queue("Space is terribly quiet...");
+                narration.queue("......");
+                narration.queue("............");
+                narration.queue("After an eternity in the void,\nthe R&D center finally\ndrifts into Martha's comms range.");
+                narration.queue("Martha opens the channel.\n\"Moonwell, Moonwell, this is Martha\nfrom \'Life\' base. Flight code 21395.\"");
+                narration.queue("\"......\"");
+                narration.queue("Silence.");
+                narration.queue("\"Moonwell, Moonwell, 21395.\nRequesting landing clearance.\"");
+                narration.queue("\"......\"");
+                narration.queue("Nothing but still silence.");
+                narration.queue("Martha has already flown to the center's gate.\nA massive vacuum door blocks her way.");
                 break;
             case 2:
                 narration.queue("CH.3  ENEMY FORTRESS");

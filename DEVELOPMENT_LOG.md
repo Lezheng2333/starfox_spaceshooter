@@ -714,3 +714,23 @@ Ver 1.0.1 | 2026-05-08
       中钳制至 maxSlot
     - BUGFIX: NEXT CHAPTER 回到开始画面 — resetGame()后设置 atStartScreen=false
     - BUGFIX: 部分菜单未静音 — BGM off 条件覆盖全部非游戏界面
+
+  Ver 1.2.19 | 自动出敌系统 + Ch2训练机 + 测试双入口
+    - 新增自动出敌系统（autoSpawnPhase 状态机，从球体Boss DONE后触发）：
+      - Wave 1: 3只普敌，全部消灭+score≥3→Wave 2
+      - Wave 2: 5只普敌，全部消灭+score≥8→Wave 3
+      - Wave 3: 初始5只+4轮增援（每消灭3只补3只）+飞出即补→弹幕敌人
+    - 全部波次统一逃逸检测（帧间delta公式）：敌人飞出画面立刻补充，
+      aliveLast/aliveKills last快照+queued计入防重复检测
+    - 统一spawn pump：queue-driven，不限phase，逃逸替补和增援均在0.2s间隔生成
+    - 波次过渡使用分数门槛（真实击杀），飞出≠击杀不推进波次
+    - 新增 Ch2Trainer 横版训练机（与Ch1 TrainingPlane同一飞机侧视角度，1:1尺寸），
+      Ch2当前使用trainer单发基础射击，NightElf类和NightElfEnergy系统搁置保留
+    - 第二章测试模式双入口：SPHERE BOSS FULL（完整Boss入场+动画+战斗）/
+      COMBAT ONLY（跳过Boss直接进入自动出敌波次）
+    - 删除 press 1/2 手动刷怪代码和key1Was/key2Was边沿检测变量
+    - 新增 Ch2AlienManager::countLiving() 统计存活普敌数
+    - BUGFIX: autoSpawnPhase=2/4逃逸替补入队后spawn pump未执行 —
+      将spawn pump从phase-gated改为queue-driven（if autoSpawnQueued>0）
+    - BUGFIX: Wave 3逃逸检测无限刷新 — expectedAlive公式累积重复计算，
+      改为帧间delta（aliveLost-killsGained）

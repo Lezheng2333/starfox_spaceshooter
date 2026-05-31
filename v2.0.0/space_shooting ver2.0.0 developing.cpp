@@ -33,6 +33,7 @@ class AudioEngine;
 class FloatingTextManager;
 class ParticleManager;
 class TrainingPlane;
+class Ch2Trainer;
 class NightElf;
 class BulletManager;
 class Ch1ShockwaveManager;
@@ -1396,6 +1397,58 @@ public:
         if (t < 0.0) t = 0.0; if (t > 1.0) t = 1.0;
         return t;
     }
+};
+
+// ============== Ch2Trainer (Chapter 2 side-scrolling trainer) ==============
+// Same aircraft as Ch1 TrainingPlane, rotated 90 deg for side-scrolling view.
+// Ch1 raw coords (nose-up top-down): nose(0,-12) leftB(-10,6) rightB(10,6)
+//   wings lw1(-6,0)→lw2(-14,4)  rw1(6,0)→rw2(14,4)  tail(0,6)→(0,12)
+// Ch2 rotated (x,y)→(-y,x), same scale as Ch1:
+//   nose(12,0)  topB(-6,-10)  bottomB(-6,10)
+//   uw(0,-6)→uw2(-4,-14)  lw(0,6)→lw2(-4,14)  tail(-6,0)→(-12,0)
+class Ch2Trainer : public Player {
+public:
+    Ch2Trainer() : Player() {}
+
+    void reset() {
+        x = 100; y = WIN_HEIGHT / 2;
+        resetState();
+    }
+
+    void draw(SDL_Renderer* r) const override {
+        if (getInvFrames() > 0 && (getInvFrames() / 4) % 2 == 0) return;
+        int px = getX(), py = getY();
+        SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+
+        // Triangular body (same as Ch1 trainer, rotated -90 deg, 1:1 scale)
+        SDL_Point nose    = {px + 12, py};
+        SDL_Point topB    = {px - 6, py - 10};
+        SDL_Point bottomB = {px - 6, py + 10};
+        SDL_Point body[3] = {nose, topB, bottomB};
+        SDL_RenderDrawLines(r, body, 3);
+        SDL_RenderDrawLine(r, topB.x, topB.y, bottomB.x, bottomB.y);
+
+        // Upper wing (Ch1 left wing, rotated)
+        SDL_Point uw1 = {px, py - 6};
+        SDL_Point uw2 = {px - 4, py - 14};
+        SDL_RenderDrawLine(r, uw1.x, uw1.y, uw2.x, uw2.y);
+
+        // Lower wing (Ch1 right wing, rotated)
+        SDL_Point lw1 = {px, py + 6};
+        SDL_Point lw2 = {px - 4, py + 14};
+        SDL_RenderDrawLine(r, lw1.x, lw1.y, lw2.x, lw2.y);
+
+        // Tail (Ch1 center tail, rotated)
+        SDL_Point tail1 = {px - 6, py};
+        SDL_Point tail2 = {px - 12, py};
+        SDL_RenderDrawLine(r, tail1.x, tail1.y, tail2.x, tail2.y);
+    }
+
+    int getGunCount() const override { return 1; }
+    void getGunOffset(int idx, int& ox, int& oy) const override {
+        ox = 12; oy = 0;
+    }
+    int getNoseOffset() const override { return 12; }
 };
 
 // ============== NightElf (plane 2, Ch2 default) ==============
@@ -3700,6 +3753,11 @@ public:
     Ch2AlienManager(int& hp, bool& go) : Ch2ShooterBase(hp, go) {}
     void reset() { aliens.clear(); resetBase(); }
     void forceSpawn() { spawnOne(); }
+    int countLiving() const {
+        int cnt = 0;
+        for (const auto& a : aliens) { if (!a.defeated && a.active) cnt++; }
+        return cnt;
+    }
     const std::vector<Ch2Alien>& getAliens() const { return aliens; }
 
     void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
@@ -4045,6 +4103,7 @@ class Game {
     Font font;
 
     TrainingPlane trainingPlane;
+    Ch2Trainer ch2Trainer;
     NightElf nightElf;
     Player* player;
     BulletManager bulletMgr;
@@ -4124,6 +4183,13 @@ class Game {
     // Edge detection helpers for menus
     bool upWas, downWas, enterWas, escWas, leftWas, rightWas;
     bool key1Was, key2Was;  // test-mode enemy spawn edge detection
+    int autoSpawnPhase;    // 0=idle,1=spawnW1(3),2=fightW1,3=spawnW2(5),4=fightW2,5=wave3,6=danmaku+done
+    int autoSpawnQueued;   // aliens left to spawn in current spawning phase
+    int autoSpawnTimer;    // countdown frames to next spawn (0.2s=12)
+    int autoSpawnWave3Reinf;  // wave3 reinforcement rounds done (0-4)
+    int autoSpawnScoreBase;   // score when auto-spawn activated (for kill counting across all waves)
+    int autoSpawnAliveLast;   // alive+queued snapshot for delta escape detection
+    int autoSpawnKillsLast;   // kills snapshot for delta
     int lastShockwaveLevel;
 
     // Ch1Background (per chapter, persistent)
@@ -4150,7 +4216,11 @@ public:
           ch2AlienMgr(ch2PlayerHP, ch2GameOver), dmMgr(ch2PlayerHP, ch2GameOver),
           dmFireCooldown(0), sphereBossActive(false), playerHitCount(0), tripleBeepCounter(0),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
-          leftWas(false), rightWas(false), key1Was(false), key2Was(false), lastShockwaveLevel(0),
+          leftWas(false), rightWas(false), key1Was(false), key2Was(false),
+          autoSpawnPhase(0), autoSpawnQueued(0), autoSpawnTimer(0),
+          autoSpawnWave3Reinf(0), autoSpawnScoreBase(0),
+          autoSpawnAliveLast(0), autoSpawnKillsLast(0),
+          lastShockwaveLevel(0),
           background(nullptr), sideBg(nullptr) {
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         background = new Ch1Background(chapterMgr.getConfig());
@@ -4178,7 +4248,7 @@ public:
         lastShockwaveLevel = 0;
         baseHP = 10;
         if (chapterMgr.getConfig().isSideScrolling) {
-            nightElf.reset(); player = &nightElf;
+            ch2Trainer.reset(); player = &ch2Trainer;
         } else {
             trainingPlane.reset(); player = &trainingPlane;
         }
@@ -4198,6 +4268,9 @@ public:
         ch2AlienMgr.reset(); dmMgr.reset(); dmFireCooldown = 0;
         sphereBoss.reset(); sphereBossActive = false;
         nightElfEnergy.reset(); playerHitCount = 0; tripleBeepCounter = 0;
+        autoSpawnPhase = 0; autoSpawnQueued = 0; autoSpawnTimer = 0;
+        autoSpawnWave3Reinf = 0; autoSpawnScoreBase = 0;
+        autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
         bossDefeatTimer = 0; defeatAlienTimer = 0; defeatReturnTimer = 0;
         defeatFWTimer = 0; defeatMCDelay = 0; defeatFadeTimer = 0;
         countdown = -1; countdownFrame = 0;
@@ -4351,7 +4424,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.18", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.19", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -4414,27 +4487,39 @@ private:
             if (mk.enter && !enterWas) {
                 if (testChapterSelection == 0) { chapterMgr.selectChapter(0); testAtChapterSelect = false; tJustEntered = true; }
                 else if (testChapterSelection == 1) {
-                    // Chapter 2: start sphere boss flow
                     chapterMgr.selectChapter(1);
-                    resetGame(); atStartScreen = false; atTestSelect = false;
-                    isNormalPlay = false;
-                    alienMgr.applyChapterConfig(chapterMgr.getConfig());
-                    bulletMgr.updateParams(0);
-                    shockwaveMgr.updateParams(0);
-                    dmFireCooldown = 0;
-                    sphereBoss.init(sideBg, player);
-                    sphereBossActive = true;
-                    sphereBoss.startEntering();
-                    tJustEntered = true;
+                    testAtChapterSelect = false; testScoreSelection = 0; tJustEntered = true;
                 }
             }
         } else {
-            // Level 2: Score/target selection for selected chapter
+            // Level 2: sub-menu for selected chapter
+            bool isCh2 = chapterMgr.getConfig().isSideScrolling;
+            int maxSel = isCh2 ? 1 : 9;
             if (mk.esc && !escWas) { testAtChapterSelect = true; tJustEntered = true; }
             if (mk.up && !upWas && testScoreSelection > 0)     testScoreSelection--;
-            if (mk.down && !downWas && testScoreSelection < 9) testScoreSelection++;
+            if (mk.down && !downWas && testScoreSelection < maxSel) testScoreSelection++;
         if (mk.enter && !enterWas) {
             int savedSel = testScoreSelection;
+            if (isCh2) {
+                // Chapter 2 sub-menu: two entry points
+                resetGame(); atStartScreen = false; atTestSelect = false;
+                isNormalPlay = false;
+                alienMgr.applyChapterConfig(chapterMgr.getConfig());
+                bulletMgr.updateParams(0);
+                shockwaveMgr.updateParams(0);
+                dmFireCooldown = 0;
+                if (savedSel == 0) {
+                    // Option 0: Full boss entry (entrance animation → fight → debris → combat)
+                    sphereBoss.init(sideBg, player);
+                    sphereBossActive = true;
+                    sphereBoss.startEntering();
+                } else {
+                    // Option 1: Skip to combat (boss done, auto-spawn wave 1)
+                    autoSpawnPhase = 1; autoSpawnQueued = 3; autoSpawnTimer = 0;
+                }
+                tJustEntered = true; return;
+            }
+            // Chapter 1 sub-menu: score/target selection
             resetGame();
             atTestSelect = false; tJustEntered = true;
             atStartScreen = false;
@@ -4581,23 +4666,43 @@ private:
             }
             font.drawString(r, "W/S:select  ENTER:enter  ESC:back", CENTER_X - 216, 490, 2);
         } else {
-            // Level 2: Score selection
-            font.drawString(r, "TEST - CHAPTER 1", CENTER_X - 192, 50, 4);
-            SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
-            SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
-            const char* testLabels[10] = {"0", "30", "60", "90", "120", "150", "180", "200 BOSS", "BOSS PH.2", "BOSS 1HP"};
-            const int MENU_Y0 = 130, GAP = 48;
-            for (int i = 0; i < 10; ++i) {
-                int itemW = (int)strlen(testLabels[i]) * 6 * 3;
-                int itemX = CENTER_X - itemW / 2;
-                int itemY = MENU_Y0 + i * GAP;
-                font.drawString(r, testLabels[i], itemX, itemY, 3);
-                if (i == testScoreSelection) {
-                    UIRenderer::drawMenuCursor(r, itemX - 24, itemY + 10, 10);
-                    UIRenderer::drawMenuUnderline(r, itemX, itemY + 24, itemW);
+            // Level 2: Sub-menu for selected chapter
+            bool isCh2 = chapterMgr.getConfig().isSideScrolling;
+            if (isCh2) {
+                font.drawString(r, "TEST - CHAPTER 2", CENTER_X - 192, 50, 4);
+                SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
+                SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
+                const char* labels[2] = {"SPHERE BOSS FULL", "COMBAT ONLY"};
+                const int MENU_Y0 = 160, GAP = 56;
+                for (int i = 0; i < 2; ++i) {
+                    int itemW = (int)strlen(labels[i]) * 6 * 3;
+                    int itemX = CENTER_X - itemW / 2;
+                    int itemY = MENU_Y0 + i * GAP;
+                    font.drawString(r, labels[i], itemX, itemY, 3);
+                    if (i == testScoreSelection) {
+                        UIRenderer::drawMenuCursor(r, itemX - 24, itemY + 10, 10);
+                        UIRenderer::drawMenuUnderline(r, itemX, itemY + 24, itemW);
+                    }
                 }
+                font.drawString(r, "W/S:select  ENTER:start  ESC:back", CENTER_X - 210, 490, 2);
+            } else {
+                font.drawString(r, "TEST - CHAPTER 1", CENTER_X - 192, 50, 4);
+                SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
+                SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
+                const char* testLabels[10] = {"0", "30", "60", "90", "120", "150", "180", "200 BOSS", "BOSS PH.2", "BOSS 1HP"};
+                const int MENU_Y0 = 130, GAP = 48;
+                for (int i = 0; i < 10; ++i) {
+                    int itemW = (int)strlen(testLabels[i]) * 6 * 3;
+                    int itemX = CENTER_X - itemW / 2;
+                    int itemY = MENU_Y0 + i * GAP;
+                    font.drawString(r, testLabels[i], itemX, itemY, 3);
+                    if (i == testScoreSelection) {
+                        UIRenderer::drawMenuCursor(r, itemX - 24, itemY + 10, 10);
+                        UIRenderer::drawMenuUnderline(r, itemX, itemY + 24, itemW);
+                    }
+                }
+                font.drawString(r, "W/S:select  ENTER:start  ESC:back", CENTER_X - 210, 490, 2);
             }
-            font.drawString(r, "W/S:select  ENTER:start  ESC:back", CENTER_X - 210, 490, 2);
         }
     }
 
@@ -4750,7 +4855,7 @@ private:
             // TrainingPlane shooting (Chapter 1 original fire rate)
             if (dmFireCooldown > 0) dmFireCooldown--;
             if (shoot && dmFireCooldown <= 0) {
-                int nGuns = nightElfEnergy.isTripleActive() ? 3 : player->getGunCount();
+                int nGuns = player->getGunCount();
                 for (int g = 0; g < nGuns; ++g) {
                     int ox, oy;
                     player->getGunOffset(g, ox, oy);
@@ -4761,13 +4866,64 @@ private:
             bulletMgr.update(alienMgr.all());
             bulletMgr.removeInactive();
 
-            // ==== Ch2 test-mode controls (disabled during sphere boss) ====
-            if (!isNormalPlay && !sphereBossActive) {
-                bool key1Now = keys[SDL_SCANCODE_1];
-                bool key2Now = keys[SDL_SCANCODE_2];
-                if (key1Now && !key1Was) { ch2AlienMgr.forceSpawn(); }
-                if (key2Now && !key2Was) { dmMgr.spawnEnemy(); }
-                key1Was = key1Now; key2Was = key2Now;
+            // ==== Ch2 auto-spawn wave system ====
+            // Start after sphere boss finishes all animations (DONE state)
+            if (autoSpawnPhase == 0 && sphereBossActive && sphereBoss.getState() == Ch2SphereBoss::DONE) {
+                autoSpawnPhase = 1; autoSpawnQueued = 3; autoSpawnTimer = 0;
+                autoSpawnScoreBase = score;  // record baseline for kill counting
+                autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
+            }
+            // Spawn pump: processes any queued aliens (initial waves + escape replacements + reinforcements)
+            if (autoSpawnQueued > 0) {
+                if (autoSpawnTimer > 0) autoSpawnTimer--;
+                if (autoSpawnTimer <= 0) {
+                    ch2AlienMgr.forceSpawn();
+                    autoSpawnQueued--;
+                    autoSpawnTimer = 12; // 0.2s = 12 frames
+                }
+                // Auto-transition for waves 1,2 when initial batch fully spawned
+                if (autoSpawnQueued <= 0 && (autoSpawnPhase == 1 || autoSpawnPhase == 3))
+                    autoSpawnPhase++;
+            }
+            // Unified escape detection (fight phases 2,4,5): alive delta not from kills = escaped
+            if (autoSpawnPhase == 2 || autoSpawnPhase == 4 || autoSpawnPhase == 5) {
+                if (autoSpawnQueued <= 0) {
+                    int alive = ch2AlienMgr.countLiving();
+                    int kills = score - autoSpawnScoreBase;
+                    int aliveLost = autoSpawnAliveLast - alive;
+                    int killsGained = kills - autoSpawnKillsLast;
+                    int escaped = aliveLost - killsGained;
+                    if (escaped > 0) { autoSpawnQueued += escaped; autoSpawnTimer = 12; }
+                    autoSpawnAliveLast = alive + autoSpawnQueued;
+                    autoSpawnKillsLast = kills;
+                }
+            }
+            // Wave1→Wave2 transition: field empty + score ≥ 3
+            if (autoSpawnPhase == 2 && autoSpawnQueued <= 0) {
+                if (ch2AlienMgr.countLiving() == 0 && (score - autoSpawnScoreBase) >= 3) {
+                    autoSpawnPhase = 3; autoSpawnQueued = 5; autoSpawnTimer = 12;
+                }
+            }
+            // Wave2→Wave3 transition: field empty + score ≥ 8
+            if (autoSpawnPhase == 4 && autoSpawnQueued <= 0) {
+                if (ch2AlienMgr.countLiving() == 0 && (score - autoSpawnScoreBase) >= 8) {
+                    autoSpawnPhase = 5; autoSpawnQueued = 5; autoSpawnTimer = 12;
+                    autoSpawnWave3Reinf = 0;
+                }
+            }
+            // Wave 3: reinforcement + danmaku gate (phase 5)
+            if (autoSpawnPhase == 5 && autoSpawnQueued <= 0) {
+                int alive = ch2AlienMgr.countLiving();
+                int kills = score - autoSpawnScoreBase - 8;  // kills within wave3 only
+                // Reinforcement: every 3 wave3 kills, spawn 3 more (up to 4 rounds)
+                while (autoSpawnWave3Reinf < 4 && kills >= 3 * (autoSpawnWave3Reinf + 1)) {
+                    autoSpawnQueued += 3; autoSpawnWave3Reinf++;
+                }
+                // Danmaku gate: 4 reinf rounds done + field clear + no pending spawns
+                if (autoSpawnWave3Reinf >= 4 && alive == 0 && autoSpawnQueued <= 0) {
+                    dmMgr.spawnEnemy();
+                    autoSpawnPhase = 6;
+                }
             }
             player->updateInvFrames();
             ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr, playerHitCount);
@@ -4791,22 +4947,10 @@ private:
                         b.active = false;
                         sphereBoss.takeDamage(1);
                         sphereBoss.popDiamonds(1);
-                        playerHitCount++;
                         particleMgr.spawnExplosion(b.x, b.y, 2);
                     }
                 }
             }
-
-            // NightElf energy: process all hits (managers + sphere boss), sounds
-            nightElfEnergy.update(playerHitCount);
-            if (nightElfEnergy.justEnteredTriple()) audio.sndTripleOn();
-            int tTimer = nightElfEnergy.getTripleTimer();
-            if (nightElfEnergy.isTripleActive() && tTimer <= 180 && tTimer > 0) {
-                int beepInterval = (tTimer > 120) ? 40 : (tTimer > 60) ? 25 : 12;
-                tripleBeepCounter++;
-                if (tripleBeepCounter >= beepInterval) { audio.sndTripleCountdown(); tripleBeepCounter = 0; }
-            } else { tripleBeepCounter = 0; }
-            playerHitCount = 0;
 
             floatingTextMgr.update();
             particleMgr.update();
@@ -5336,32 +5480,6 @@ private:
                 HUDBase::drawScore(renderer.get(), font, score, WIN_WIDTH - 10, 10);
                 HUDBase::drawHPHearts(renderer.get(), font, ch2PlayerHP, 3, WIN_WIDTH - 10, 28);
                 HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, 0.0f);  // green (placeholder)
-                // White energy bar below green
-                {
-                    float fill = nightElfEnergy.getFill();
-                    int wx = WIN_WIDTH - 10 - 10*14, wy = 54, ww = 10*14, wh = 6;
-                    SDL_SetRenderDrawColor(renderer.get(), 30, 30, 30, 255);
-                    SDL_Rect bg = {wx, wy, ww, wh}; SDL_RenderFillRect(renderer.get(), &bg);
-                    int fw = (int)(fill * ww); if (fw > ww) fw = ww;
-                    if (fw > 0) {
-                        bool triple = nightElfEnergy.isTripleActive();
-                        bool decaying = nightElfEnergy.isDecaying();
-                        bool charging = nightElfEnergy.isCharging();
-                        int rCol = 220, gCol = 220, bCol = 220; // default bright white
-                        if (triple) {
-                            // Glowing pulse during triple-fire
-                            int pulse = (int)(180 + 75 * std::sin(SDL_GetTicks() * 0.015));
-                            rCol = pulse; gCol = pulse; bCol = pulse;
-                        } else if (decaying) {
-                            rCol = 120; gCol = 120; bCol = 120; // dim white
-                        } else if (charging) {
-                            rCol = 240; gCol = 240; bCol = 240; // bright white
-                        }
-                        SDL_SetRenderDrawColor(renderer.get(), (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
-                        SDL_Rect fr = {wx, wy, fw, wh}; SDL_RenderFillRect(renderer.get(), &fr);
-                    }
-                }
-                if (!isNormalPlay) font.drawString(renderer.get(), "press 1/2", 10, 10, 2);
                 if (aimAssistOn) drawAimAssistSide();
             } else player->draw(renderer.get());
 

@@ -18,20 +18,21 @@ Control your starfighter in a massive space, shoot down alien ships, survive wav
 
 > macOS 11.0+
 
-[Download v1.2.18](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.18) (latest)
+[Download v1.2.19](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.19) (latest)
 	
+	[Download v1.2.18](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.18)
+
 	[Download v1.2.17](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.17)
 
 Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.18)
+## What's New / 最近更新 (v1.2.19)
 
-- **球体Boss战来了！** 第二章新增巨型蓝色球体Boss——由600多颗六角密铺菱形组成，从右侧滚动入场，从下到上蓝变橙逐个激活，受击后菱形碎片飞溅散落，HP归零后碎裂→震动→突袭飞散全流程华丽动画。测试模式直接选CHAPTER 2即可体验。
-- **夜精灵能量条系统！** 命中敌人积蓄白色能量条，50次命中蓄满后自动激活15秒三炮火力全开模式，屏幕右上角两道能量条一绿一白清晰显示状态，最后3秒加速蜂鸣倒计时。
-- **对话系统防级联修复！** 修复了对话触发后连续弹出一串的问题，现在每个触发点严格只触发一次，节奏清爽。
-- **细节修复：** 暂停页对话历史方向键首次按就生效；开始/章节选择/设置/任务完成等所有菜单页统一静音；NEXT CHAPTER 直接进入下一章再也不跳回主菜单。
+- **自动出敌系统！** 球体Boss动画结束后，普敌自动刷新——Wave 1三只→Wave 2五只→Wave 3初始五只+四轮增援（每消灭3只补3只）→最终弹幕敌人。敌人飞出画面立刻补充，波次用分数门槛判定，节奏紧凑不中断。
+- **第二章测试模式双入口！** TEST→CHAPTER 2新增两个入口：SPHERE BOSS FULL观看完整Boss动画+后续战斗，COMBAT ONLY跳过Boss直接进入出敌波次，和第一章测试入口一样方便。
+- **Ch2训练机上线！** 第二章当前使用横版训练机（与第一章同款三角机身旋转侧视角），单发基础射击，NightElf和能量条系统暂搁置后续激活。
 
 ## Build from Source / 从源码编译
 
@@ -52,7 +53,7 @@ Requires SDL2: `brew install sdl2`
 │   ├── space_shooting ver1.0.0.cpp
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
-└── v2.0.0/                                     # 当前开发主线 (v1.2.18)
+└── v2.0.0/                                     # 当前开发主线 (v1.2.19)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
     └── Release Version/                          # 发布版本
@@ -69,7 +70,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.15.app/ + .zip                  # v1.2.15
         ├── Shooter ver1.2.16.app/ + .zip                  # v1.2.16
         ├── Shooter ver1.2.17.app/ + .zip                  # v1.2.17
-        └── Shooter ver1.2.18.app/ + .zip                  # v1.2.18 (最新)
+        ├── Shooter ver1.2.18.app/ + .zip                  # v1.2.18
+        └── Shooter ver1.2.19.app/ + .zip                  # v1.2.19 (最新)
 ```
 
 ## License

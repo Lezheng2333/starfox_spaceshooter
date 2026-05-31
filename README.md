@@ -18,19 +18,20 @@ Control your starfighter in a massive space, shoot down alien ships, survive wav
 
 > macOS 11.0+
 
-[Download v1.2.17](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.17) (latest)
+[Download v1.2.18](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.18) (latest)
+	
+	[Download v1.2.17](https://github.com/Lezheng2333/starfox_spaceshooter/releases/tag/v1.2.17)
 
 Download the `.zip`, unzip, and run `Shooter.app`.
 
 下载 `.zip` 后解压，直接运行 `Shooter.app`。
 
-## What's New / 最近更新 (v1.2.17)
+## What's New / 最近更新 (v1.2.18)
 
-- **结束页面全新设计！** Boss 击败后的 MISSION COMPLETE 现在用旁白风格墨绿文本框优雅呈现，两个选项居中排列——NEXT CHAPTER 一键直达下一章开幕旁白，BACK TO MAIN MENU 返回主菜单。光标是醒目的黄色下划线，再也不会找不到焦点在哪。
-- **第一章透视飞行感！** 战机移动速度现在随高度变化——贴地平线飞的时候速度自然放慢（~0.7x），俯冲到画面下端时速度加快（~1.3x），中间高度保持默认速度。越靠近地平线越像在远处巡航，越靠近下端越有高速掠过地面的感觉。
-- **第二章开幕旁白完整重写！** 12 页氛围感旁白，从惨胜后的基地废墟、老旧教练机疲惫的引擎震颤、太空的死寂，到 Moonwell 研发中心门前那扇沉默的真空门——还没开打就已经沉浸在故事里了。
-- **开始/暂停页面静音！** 开始画面和暂停画面不再播放 BGM，耳根清净。同时预留了 setStartBgm() 接口，等你想给它配上专属音乐。
-- **细节打磨：** 暂停页右半区新增 HISTORY DIALOGUE 标题；对话单行收窄到 20 字符，信息更紧凑；字体库补齐小写 q（p 的完美镜像）；第二章背景玻璃不再在画面内闪现刷新。
+- **球体Boss战来了！** 第二章新增巨型蓝色球体Boss——由600多颗六角密铺菱形组成，从右侧滚动入场，从下到上蓝变橙逐个激活，受击后菱形碎片飞溅散落，HP归零后碎裂→震动→突袭飞散全流程华丽动画。测试模式直接选CHAPTER 2即可体验。
+- **夜精灵能量条系统！** 命中敌人积蓄白色能量条，50次命中蓄满后自动激活15秒三炮火力全开模式，屏幕右上角两道能量条一绿一白清晰显示状态，最后3秒加速蜂鸣倒计时。
+- **对话系统防级联修复！** 修复了对话触发后连续弹出一串的问题，现在每个触发点严格只触发一次，节奏清爽。
+- **细节修复：** 暂停页对话历史方向键首次按就生效；开始/章节选择/设置/任务完成等所有菜单页统一静音；NEXT CHAPTER 直接进入下一章再也不跳回主菜单。
 
 ## Build from Source / 从源码编译
 
@@ -51,7 +52,7 @@ Requires SDL2: `brew install sdl2`
 │   ├── space_shooting ver1.0.0.cpp
 │   ├── Shooter ver1.0.0.app/
 │   └── Shooter ver1.0.0.zip
-└── v2.0.0/                                     # 当前开发主线 (v1.2.17)
+└── v2.0.0/                                     # 当前开发主线 (v1.2.18)
     ├── space_shooting ver2.0.0 developing.cpp              # 当前开发源码
     ├── space_shooting ver2.0.0 deprecated.cpp              # 原始代码 (已废弃)
     └── Release Version/                          # 发布版本
@@ -67,7 +68,8 @@ Requires SDL2: `brew install sdl2`
         ├── Shooter ver1.2.14.app/ + .zip                  # v1.2.14
         ├── Shooter ver1.2.15.app/ + .zip                  # v1.2.15
         ├── Shooter ver1.2.16.app/ + .zip                  # v1.2.16
-        └── Shooter ver1.2.17.app/ + .zip                  # v1.2.17 (最新)
+        ├── Shooter ver1.2.17.app/ + .zip                  # v1.2.17
+        └── Shooter ver1.2.18.app/ + .zip                  # v1.2.18 (最新)
 ```
 
 ## License

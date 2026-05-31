@@ -40,6 +40,7 @@ class Ch1AlienManager;
 class Ch1Boss;
 class ChapterManager;
 class Ch1Background;
+class Ch2SphereBoss;
 class Ch2Background;
 class Ch2DanmakuManager;
 class Ch2AlienManager;
@@ -609,6 +610,9 @@ public:
         playSound(500, 0, 12, 0.05f, 0, 1);       // low sine body: radio depth
     }
     void sndTeletype()  { playSound(2400, 1800, 20, 0.10f, 3, 2); }
+    void sndTripleOn()  { playSound(2600, 0, 22, 0.16f, 0, 2);    // crisp metallic ping
+                          playSound(3200, 0, 14, 0.10f, 0, 2); }  // harmonic overtone
+    void sndTripleCountdown() { playSound(1600, 0, 8, 0.08f, 0, 2); } // short beep
     void sndAllyTalk()  { playSound(3200, 2200, 14, 0.07f, 0, 2); }  // AI copilot: high sine blip
     void sndTowerTalk() { playSound(800, 400, 16, 0.08f, 3, 1); }   // tower AI: mid sweep
     void sndBryssaTalk(){ playSound(1500, 600, 12, 0.07f, 1, 2); }  // human comms: mid-high square
@@ -764,12 +768,17 @@ public:
     int scroll = 0;
     int focusSlot = 2;  // 0=top, 1=mid, 2=bottom
 
-    void resetView() { scroll = 0; focusSlot = 2; }
+    void resetView() {
+        scroll = 0;
+        int total = size();
+        focusSlot = (total >= 3) ? 2 : (total > 0 ? total - 1 : 2);
+    }
 
     void moveUp() {
         int total = size();
         if (total == 0) return;
         int maxSlot = (total >= 3) ? 2 : total - 1;
+        if (focusSlot > maxSlot) focusSlot = maxSlot;
         int bottomIdx = total - 1 - scroll;
         bool canScrollOlder = (bottomIdx > maxSlot);
         if (focusSlot > 0) focusSlot--;
@@ -779,6 +788,7 @@ public:
         int total = size();
         if (total == 0) return;
         int maxSlot = (total >= 3) ? 2 : total - 1;
+        if (focusSlot > maxSlot) focusSlot = maxSlot;
         if (focusSlot < maxSlot) focusSlot++;
         else if (scroll > 0) scroll--;
     }
@@ -1436,7 +1446,7 @@ public:
         }
     }
 
-    int getGunCount() const override { return 3; }
+    int getGunCount() const override { return 1; } // single-fire for now
     void getGunOffset(int idx, int& ox, int& oy) const override {
         if (idx == 0)      { ox = 32; oy = 0; }    // nose tip
         else if (idx == 1) { ox = 29; oy = -8; }   // upper wing tip
@@ -2604,6 +2614,384 @@ public:
 };
 
 
+// ============== Ch2SphereBoss ==============
+class Ch2SphereBoss {
+public:
+    enum State { INACTIVE, ENTERING, ACTIVATING, FIGHT, SHATTERING,
+                 COLLAPSING, SHAKING, RUSHING_OUT, DONE };
+
+    struct Cell {
+        double relX, relY;
+        int activationOrder, shatterOrder;
+        bool onSphere, activated;
+        int colorState; // 0=blue 1=orange 2=white
+    };
+    struct SphereDebris {
+        double x, y, vx, vy, rotAngle, rotSpeed;
+        bool onGround, rushing;
+        double shakeDelay, shakePhase;
+        double rushVx, rushVy;
+        double floorY;     // per-debris landing Y for perspective floor scatter
+    };
+
+    Ch2SphereBoss() : cx(900), cy(290), worldX(1200), radius(150),
+        hp(500), maxHp(500), state(INACTIVE), stateTimer(0),
+        activationIdx(0), shatterIdx(0), rushIdx(0),
+        fixedSeed(12345), entryStartX(900), entryBgStopped(false),
+        bg(nullptr), playerRef(nullptr), bgTargetSpeed(-1.0) {}
+
+    void init(Ch2Background* b, Player* p) { bg = b; playerRef = p; }
+    void reset() { state = INACTIVE; stateTimer = 0; cells.clear(); activationByOrder.clear();
+        debris.clear(); activationIdx = shatterIdx = rushIdx = 0; hp = maxHp; }
+
+    State getState() const { return state; }
+    bool isActive() const { return state != INACTIVE && state != DONE; }
+
+    void startEntering() {
+        reset();
+        generateCells();
+        state = ENTERING; stateTimer = 0;
+        worldX = 1200; // far right, scrolls in with background
+        cx = worldX; cy = 290;
+    }
+
+    // Test mode: spawn sphere at center in FIGHT state immediately
+    void startAtCenter() {
+        reset();
+        worldX = WIN_WIDTH / 2; cx = worldX; cy = 290;
+        generateCells();
+        for (auto& c : cells) { c.activated = true; c.colorState = 1; }
+        bgTargetSpeed = 0.0; // stop background
+        state = FIGHT; stateTimer = 0;
+    }
+
+    // Update screen position from world coords
+    void syncScreenPos(double scrollX) {
+        cx = worldX - scrollX;
+    }
+
+    double getCx() const { return cx; }
+    double getCy() const { return cy; }
+    double getRadius() const { return radius; }
+    double getBgTargetSpeed() const { return bgTargetSpeed; }
+    void clearBgTargetSpeed() { bgTargetSpeed = -1.0; }
+    void takeDamage(int dmg) { if (state == FIGHT) { hp -= dmg; if (hp < 0) hp = 0; } }
+
+    void update() {
+        if (state == INACTIVE || state == DONE) return;
+        stateTimer++;
+
+        switch (state) {
+        case ENTERING: {
+            // Sphere scrolls in with background; slow down as it approaches center
+            double targetScreenX = WIN_WIDTH / 2;
+            double distToTarget = std::abs(cx - targetScreenX);
+            double slowFactor = 1.0;
+            if (distToTarget < 300) {
+                slowFactor = distToTarget / 300.0;
+                if (slowFactor < 0.05) slowFactor = 0.05;
+            }
+            bgTargetSpeed = 3.5 * slowFactor;
+            // Lock position and stop bg when sphere reaches center
+            if (distToTarget < 8) {
+                cx = targetScreenX; bgTargetSpeed = 0.0;
+                state = ACTIVATING; stateTimer = 0;
+            }
+            break;
+        }
+        case ACTIVATING: {
+            // Slow stochastic wave from bottom to top (~180 frames)
+            int remaining = (int)cells.size() - activationIdx;
+            if (remaining <= 0) { state = FIGHT; stateTimer = 0; break; }
+            int perFrame = remaining / 160 + 1; // slow pace
+            int window = remaining / 20 + 8;     // lookahead window for randomness
+            if (window > remaining) window = remaining;
+            for (int i = 0; i < perFrame && activationIdx < (int)cells.size(); ++i) {
+                // Pick randomly within the upcoming window
+                int pick = activationIdx + (rand() % window);
+                if (pick >= (int)cells.size()) pick = (int)cells.size() - 1;
+                int ci = activationByOrder[pick];
+                if (!cells[ci].activated) {
+                    cells[ci].activated = true; cells[ci].colorState = 1;
+                    // Swap picked cell down to activationIdx so it's marked done
+                    std::swap(activationByOrder[pick], activationByOrder[activationIdx]);
+                }
+                // Advance activationIdx past any already-activated cells
+                while (activationIdx < (int)cells.size() &&
+                       cells[activationByOrder[activationIdx]].activated)
+                    activationIdx++;
+            }
+            if (activationIdx >= (int)cells.size()) {
+                state = FIGHT; stateTimer = 0;
+            }
+            break;
+        }
+        case FIGHT: {
+            updateDebrisPhysics();
+            bool allOff = true;
+            for (auto& c : cells) if (c.onSphere) { allOff = false; break; }
+            if (hp <= 0 || allOff) { state = SHATTERING; stateTimer = 0; shatterIdx = 0; }
+            break;
+        }
+        case SHATTERING: {
+            // Pop remaining cells rapidly
+            int perFrame = (int)cells.size() / 60 + 1;
+            int popped = 0;
+            for (auto& c : cells) {
+                if (!c.onSphere) continue;
+                if (c.shatterOrder >= shatterIdx && popped < perFrame) {
+                    popSingleCell(c);
+                    popped++;
+                }
+            }
+            shatterIdx += popped;
+            updateDebrisPhysics();
+            bool allOff = true;
+            for (auto& c : cells) if (c.onSphere) { allOff = false; break; }
+            int minTime = allOff ? 20 : 90;
+            if (allOff && stateTimer >= minTime) {
+                // Assign progressive shake delays for chain reaction
+                int n = (int)debris.size();
+                for (int i = 0; i < n; ++i) {
+                    // First debris: starts immediately, then wave propagates
+                    double baseDelay = (double)i / n * 180.0; // spread over ~3s
+                    debris[i].shakeDelay = baseDelay;
+                    debris[i].shakePhase = 0;
+                }
+                state = SHAKING; stateTimer = 0;
+            }
+            break;
+        }
+        case SHAKING: {
+            if (debris.empty()) { state = DONE; stateTimer = 0; bgTargetSpeed = 3.5; break; }
+            int shakeDuration = 120; // frames each debris shakes before rushing out
+            for (auto& d : debris) {
+                if (d.rushing) {
+                    d.x += d.rushVx; d.y += d.rushVy;
+                    d.rotAngle += 0.15;
+                    continue;
+                }
+                if (stateTimer >= d.shakeDelay) {
+                    double localT = stateTimer - d.shakeDelay;
+                    // Shake: increasing amplitude
+                    double amp = std::min(localT * 0.04, 3.5);
+                    d.shakePhase = std::sin(localT * 0.7) * amp;
+                    // After shakeDuration, rush out in random direction
+                    if (localT >= shakeDuration) {
+                        d.rushing = true;
+                        double angle = (rand() % 6283) / 1000.0;
+                        double speed = 4.0 + (rand() % 400) / 100.0;
+                        d.rushVx = std::cos(angle) * speed;
+                        d.rushVy = std::sin(angle) * speed;
+                        d.shakePhase = 0;
+                    }
+                }
+            }
+            // Remove off-screen debris
+            debris.erase(std::remove_if(debris.begin(), debris.end(),
+                [](const SphereDebris& d){ return d.rushing && (d.x<-60||d.x>WIN_WIDTH+60||d.y<-60||d.y>WIN_HEIGHT+60); }),
+                debris.end());
+            // Done when all debris gone
+            if (debris.empty()) {
+                state = DONE; stateTimer = 0;
+                bgTargetSpeed = 3.5;
+            }
+            break;
+        }
+        default: break;
+        }
+    }
+
+    void updateDebrisPhysics() {
+        for (auto& d : debris) {
+            if (d.onGround || d.rushing) continue;
+            d.vy += 0.3; d.x += d.vx; d.y += d.vy;
+            d.rotAngle += d.rotSpeed;
+            if (d.y > d.floorY) {
+                d.y = d.floorY; d.vy *= -0.3; d.vx *= 0.7;
+                if (std::abs(d.vy) < 0.5) { d.vy = 0; d.vx = 0; d.onGround = true; }
+            }
+        }
+    }
+
+    void popSingleCell(Cell& c) {
+        c.onSphere = false; c.colorState = 2;
+        double sx = cx + c.relX, sy = cy + c.relY;
+        // Perspective floor scatter: debris lands around the sphere on the floor
+        // depthFraction: 0=top of sphere (near WALL_Y), 1=bottom (near viewer)
+        double depthFraction = (c.relY + radius) / (2.0 * radius);
+        if (depthFraction < 0.1) depthFraction = 0.1;
+        if (depthFraction > 0.9) depthFraction = 0.9;
+        double dFloorY = 280.0 + (cy + radius - 280.0) * depthFraction;
+        dFloorY += (rand() % 60 - 30); // slight random variation
+        if (dFloorY < 280) dFloorY = 280;
+        if (dFloorY > cy + radius) dFloorY = cy + radius;
+        // Horizontal scatter wider at bottom (closer), narrower at top (farther)
+        double hSpread = 40.0 + 160.0 * depthFraction;
+        double targetX = cx + (rand() % (int)(hSpread * 2)) - hSpread;
+        double dx = targetX - sx;
+        double angle = (rand() % 6283) / 1000.0;
+        double speed = 1.5 + (rand() % 100) / 100.0 * 2.0;
+        SphereDebris d;
+        d.x = sx; d.y = sy;
+        d.vx = dx * 0.05 + std::cos(angle) * speed;
+        d.vy = -2.0 - (rand() % 40) / 10.0;
+        d.floorY = dFloorY;
+        d.rotAngle = 0; d.rotSpeed = (rand() % 20 - 10) / 100.0;
+        d.onGround = false; d.rushing = false;
+        d.shakeDelay = 0; d.shakePhase = 0; d.rushVx = 0; d.rushVy = 0;
+        debris.push_back(d);
+    }
+
+    // Pop diamonds off the sphere (called on bullet hit)
+    void popDiamonds(int count) {
+        int popped = 0;
+        for (auto& c : cells) {
+            if (popped >= count) break;
+            if (!c.onSphere) continue;
+            if (c.shatterOrder == shatterIdx + popped) {
+                popSingleCell(c); popped++;
+            }
+        }
+        shatterIdx += popped;
+    }
+
+    void draw(SDL_Renderer* r) const {
+        if (state == INACTIVE || state == DONE) return;
+        if (cells.empty()) return;
+
+        for (const auto& cell : cells) {
+            if (!cell.onSphere) continue;
+            double sx = cx + cell.relX;
+            double sy = cy + cell.relY;
+            // Compute distance from center for edge compression
+            double dist = std::sqrt(cell.relX * cell.relX + cell.relY * cell.relY);
+            double edgeScale = 0.55 + 0.45 * (1.0 - dist / radius);
+            double sz = 10.0 * edgeScale;
+            if (sz < 2.5) sz = 2.5;
+            int hw = (int)(sz * 2.0 / 3.0);
+
+            // Color
+            int rCol, gCol, bCol;
+            if (cell.colorState == 0) { // blue (invincible)
+                rCol = 40; gCol = 130; bCol = 230;
+            } else if (cell.colorState == 1) { // orange (attackable)
+                rCol = 230; gCol = 140; bCol = 50;
+            } else { // white (shattering flash)
+                rCol = 255; gCol = 255; bCol = 240;
+            }
+            // Top-down lighting: brighter at top, darker at bottom
+            double ny = cell.relY / dist; // upward normal component
+            double bright = 0.35 + 0.65 * (-ny * 0.55 + 0.45);
+            rCol = (int)(rCol * bright); gCol = (int)(gCol * bright); bCol = (int)(bCol * bright);
+            if (rCol > 255) rCol = 255; if (gCol > 255) gCol = 255; if (bCol > 255) bCol = 255;
+
+            SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
+            int ex = (int)sx, ey = (int)sy;
+            // Diamond: 4 vertices + closing line + 2 diagonals
+            SDL_Point pts[4] = {
+                {ex, ey - (int)sz},
+                {ex + hw, ey},
+                {ex, ey + (int)sz},
+                {ex - hw, ey}
+            };
+            SDL_RenderDrawLines(r, pts, 4);
+            SDL_RenderDrawLine(r, pts[3].x, pts[3].y, pts[0].x, pts[0].y);
+            SDL_RenderDrawLine(r, ex - hw, ey, ex + hw, ey);
+        }
+
+        // Draw debris (broken-off diamonds)
+        for (const auto& d : debris) {
+            int sz = 8;
+            int hw = sz * 2 / 3;
+            int rCol = 200, gCol = 200, bCol = 200; // grey-white debris
+            int alpha = d.rushing ? 180 : 200;
+            SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, (Uint8)alpha);
+            int ex = (int)(d.x + d.shakePhase), ey = (int)d.y;
+            double cRot = std::cos(d.rotAngle), sRot = std::sin(d.rotAngle);
+            SDL_Point pts[4] = {
+                {ex + (int)(-sz * sRot), ey + (int)(-sz * cRot)},
+                {ex + (int)( hw * cRot), ey + (int)( hw * sRot)},
+                {ex + (int)( sz * sRot), ey + (int)( sz * cRot)},
+                {ex + (int)(-hw * cRot), ey + (int)(-hw * sRot)}
+            };
+            SDL_RenderDrawLines(r, pts, 4);
+            SDL_RenderDrawLine(r, pts[3].x, pts[3].y, pts[0].x, pts[0].y);
+            SDL_RenderDrawLine(r, ex - (int)(hw*cRot), ey - (int)(hw*sRot),
+                                  ex + (int)(hw*cRot), ey + (int)(hw*sRot));
+        }
+    }
+
+private:
+    double cx, cy, worldX, radius;
+    int hp, maxHp;
+    std::vector<Cell> cells;
+    std::vector<int> activationByOrder; // maps activationOrder → cell index
+    std::vector<SphereDebris> debris;
+    State state; int stateTimer;
+    int activationIdx, shatterIdx, rushIdx;
+    uint32_t fixedSeed;
+    double entryStartX;
+    bool entryBgStopped;
+    Ch2Background* bg;
+    Player* playerRef;
+    double bgTargetSpeed; // speed request for Ch2Background
+
+    void generateCells() {
+        cells.clear();
+        const double SPACING = 16.0;
+        const double ROW_H = SPACING * 0.8660254; // sqrt(3)/2
+
+        // Center the hex grid on (0,0) for symmetry
+        int halfRows = (int)(radius / ROW_H) + 2;
+        int halfCols = (int)(radius / SPACING) + 2;
+
+        for (int row = -halfRows; row <= halfRows; ++row) {
+            double rowY = row * ROW_H;
+            double rowOff = (row % 2 == 0) ? 0.0 : SPACING * 0.5;
+            for (int col = -halfCols; col <= halfCols; ++col) {
+                double px = col * SPACING + rowOff;
+                double py = rowY;
+                double dist = std::sqrt(px*px + py*py);
+                if (dist > radius - 2.0) continue;
+                Cell c;
+                c.relX = px; c.relY = py;
+                c.onSphere = true;
+                c.activated = false;
+                c.colorState = 0; // blue
+                c.activationOrder = 0;
+                c.shatterOrder = 0;
+                cells.push_back(c);
+            }
+        }
+
+        // Assign activationOrder: sort by Y descending (bottom to top on screen)
+        std::vector<int> idxByY(cells.size());
+        for (size_t i = 0; i < idxByY.size(); ++i) idxByY[i] = (int)i;
+        std::sort(idxByY.begin(), idxByY.end(), [this](int a, int b) {
+            return cells[a].relY > cells[b].relY; // larger Y = lower on screen = activated first
+        });
+        activationByOrder.resize(cells.size());
+        for (size_t i = 0; i < idxByY.size(); ++i) {
+            cells[idxByY[i]].activationOrder = (int)i;
+            activationByOrder[i] = idxByY[i]; // order→index mapping
+        }
+
+        // Assign shatterOrder: Fisher-Yates shuffle with fixed seed
+        std::vector<int> shatterIdx(cells.size());
+        for (size_t i = 0; i < shatterIdx.size(); ++i) shatterIdx[i] = (int)i;
+        uint32_t rng = fixedSeed;
+        for (int i = (int)shatterIdx.size() - 1; i > 0; --i) {
+            rng = rng * 1103515245 + 12345;
+            int j = (int)(rng % (uint32_t)(i + 1));
+            std::swap(shatterIdx[i], shatterIdx[j]);
+        }
+        for (size_t i = 0; i < shatterIdx.size(); ++i)
+            cells[shatterIdx[i]].shatterOrder = (int)i;
+    }
+};
+
+
 // ============== Ch2Background ==============
 class Ch2Background {
 private:
@@ -2901,7 +3289,7 @@ protected:
     bool& goRef;
 
     void updateBullets(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
-                       Player& pl, FloatingTextManager& ftMgr) {
+                       Player& pl, FloatingTextManager& ftMgr, int* hitCount = nullptr) {
         for (auto& b : bullets) {
             if (!b.active) continue;
             b.x += b.dx; b.y += b.dy;
@@ -2966,6 +3354,71 @@ public:
     }
 
 };
+
+// ============== NightElfEnergy (white energy bar + triple-fire) ==============
+class NightElfEnergy {
+public:
+    static const int MAX_ENERGY = 50;
+    static const int HIT_WINDOW = 30;       // 0.5s at 60fps without hit → decay
+    static const int TRIPLE_DURATION = 900;  // 15s at 60fps
+    static const int COUNTDOWN_START = 180;  // last 3s countdown beeps
+
+    NightElfEnergy() : energy(0), lastHitFrame(-999), frameCounter(0),
+        tripleActive(false), tripleTimer(0), tripleJustEntered(false) {}
+
+    void reset() {
+        energy = 0; lastHitFrame = -999; frameCounter = 0;
+        tripleActive = false; tripleTimer = 0; tripleJustEntered = false;
+    }
+
+    void update(int hitsThisFrame) {
+        frameCounter++;
+        tripleJustEntered = false;
+        if (tripleActive) {
+            tripleTimer--;
+            if (tripleTimer <= 0) {
+                // Rapid decay back to 0 over 1 second
+                energy -= MAX_ENERGY / 60.0;
+                if (energy <= 0) { energy = 0; tripleActive = false; tripleTimer = 0; }
+            }
+            return;
+        }
+        if (hitsThisFrame > 0) {
+            energy += hitsThisFrame;
+            if (energy >= MAX_ENERGY) {
+                energy = MAX_ENERGY;
+                tripleActive = true; tripleTimer = TRIPLE_DURATION;
+                tripleJustEntered = true;
+            }
+            lastHitFrame = frameCounter;
+        } else if (frameCounter - lastHitFrame > HIT_WINDOW && energy > 0) {
+            // Decay: 50 energy in 5 seconds → 0.1667 per frame
+            energy -= MAX_ENERGY / 300.0; // MAX_ENERGY / (5*60)
+            if (energy < 0) energy = 0;
+        }
+    }
+
+    void onHit() { if (!tripleActive) { energy += 1.0; if (energy >= MAX_ENERGY) energy = MAX_ENERGY; } lastHitFrame = frameCounter; }
+    void checkTripleTrigger() {
+        if (!tripleActive && energy >= MAX_ENERGY) {
+            tripleActive = true; tripleTimer = TRIPLE_DURATION; tripleJustEntered = true;
+        }
+    }
+
+    bool isTripleActive() const { return tripleActive; }
+    bool justEnteredTriple() const { return tripleJustEntered; }
+    int getTripleTimer() const { return tripleTimer; }
+    float getFill() const { return (float)(energy / MAX_ENERGY); }
+    bool isDecaying() const { return !tripleActive && energy > 0 && frameCounter - lastHitFrame > HIT_WINDOW; }
+    bool isCharging() const { return !tripleActive && energy > 0 && frameCounter - lastHitFrame <= HIT_WINDOW; }
+
+private:
+    double energy;
+    int lastHitFrame, frameCounter;
+    bool tripleActive, tripleJustEntered;
+    int tripleTimer;
+};
+
 
 // ============== HUDBase (shared HUD drawing) ==============
 class HUDBase {
@@ -3054,7 +3507,7 @@ public:
     }
 
     void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
-                int& score, Player& pl, FloatingTextManager& ftMgr) {
+                int& score, Player& pl, FloatingTextManager& ftMgr, int& hitCount) {
         for (auto& e : enemies) {
             if (e.defeated) {
                 if (e.defeatTimer > 0) {
@@ -3132,7 +3585,7 @@ public:
                     if (!b.active || !b.canDamage) continue;
                     int bx = (int)b.x, by = (int)b.y;
                     if (bx >= ex - fl && bx <= ex + nl && by >= ey - nl + vl && by <= ey + nl) {
-                        b.active = false; b.canDamage = false; e.hp--;
+                        b.active = false; b.canDamage = false; e.hp--; hitCount++;
                         particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
                         if (e.hp <= 0) {
                             e.defeated = true; e.active = false;
@@ -3146,7 +3599,7 @@ public:
         // Remove fully dead enemies (defeated and timer done)
         enemies.erase(std::remove_if(enemies.begin(), enemies.end(),
             [](const Ch2DanmakuEnemy& e){ return e.defeated && e.defeatTimer <= 0; }), enemies.end());
-        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, pl, ftMgr);
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, pl, ftMgr, &hitCount);
     }
 
     void drawEnemy(SDL_Renderer* r) const {
@@ -3250,7 +3703,7 @@ public:
     const std::vector<Ch2Alien>& getAliens() const { return aliens; }
 
     void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
-                int& score, Player& pl, FloatingTextManager& ftMgr) {
+                int& score, Player& pl, FloatingTextManager& ftMgr, int& hitCount) {
         for (auto& a : aliens) {
             if (!a.active && !a.defeated) continue;
             if (a.defeated) continue;
@@ -3288,7 +3741,7 @@ public:
                     if (!b.active || !b.canDamage) continue;
                     double dx = b.x - a.x, dy = b.y - a.y;
                     if (dx*dx + dy*dy < 22.0*22.0) {
-                        b.active = false; b.canDamage = false; a.hp--;
+                        b.active = false; b.canDamage = false; a.hp--; hitCount++;
                         particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
                         if (a.hp <= 0) {
                             a.defeated = true; a.active = false;
@@ -3305,7 +3758,7 @@ public:
         // Remove defeated/inactive aliens
         aliens.erase(std::remove_if(aliens.begin(), aliens.end(),
             [](const Ch2Alien& a){ return !a.active && !a.defeated; }), aliens.end());
-        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, pl, ftMgr);
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, pl, ftMgr, &hitCount);
     }
 
     void drawEnemy(SDL_Renderer* r) const {
@@ -3659,6 +4112,11 @@ class Game {
     Ch2AlienManager ch2AlienMgr;
     Ch2DanmakuManager dmMgr;
     int dmFireCooldown;    // player fire cooldown in side-scroll mode
+    Ch2SphereBoss sphereBoss;
+    bool sphereBossActive;
+    NightElfEnergy nightElfEnergy;
+    int playerHitCount;
+    int tripleBeepCounter;
 
     // Timing
     Uint32 lastTime;
@@ -3690,7 +4148,7 @@ public:
           wallFlashTimer(0), wallContactY(0), wallAnimFrame(0),
           ch2PlayerHP(3), ch2GameOver(false),
           ch2AlienMgr(ch2PlayerHP, ch2GameOver), dmMgr(ch2PlayerHP, ch2GameOver),
-          dmFireCooldown(0),
+          dmFireCooldown(0), sphereBossActive(false), playerHitCount(0), tripleBeepCounter(0),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
           leftWas(false), rightWas(false), key1Was(false), key2Was(false), lastShockwaveLevel(0),
           background(nullptr), sideBg(nullptr) {
@@ -3738,6 +4196,8 @@ public:
         missionComplete = false; missionCompleteShown = false; mcMenuSelection = 0;
         wallFlashTimer = 0; wallContactY = 0; wallAnimFrame = 0;
         ch2AlienMgr.reset(); dmMgr.reset(); dmFireCooldown = 0;
+        sphereBoss.reset(); sphereBossActive = false;
+        nightElfEnergy.reset(); playerHitCount = 0; tripleBeepCounter = 0;
         bossDefeatTimer = 0; defeatAlienTimer = 0; defeatReturnTimer = 0;
         defeatFWTimer = 0; defeatMCDelay = 0; defeatFadeTimer = 0;
         countdown = -1; countdownFrame = 0;
@@ -3760,7 +4220,7 @@ public:
 
             const Uint8* keys = SDL_GetKeyboardState(NULL);
             audio.setBossMusic(phase == PHASE_BOSS_FIGHT && boss.isActive());
-            audio.setBgmOff(atStartScreen || paused);
+            audio.setBgmOff(atStartScreen || atChapterSelect || atTestSelect || atOptionScreen || atSoundMenu || paused || gameOver || missionComplete);
             audio.setCh2Bgm(chapterMgr.getConfig().isSideScrolling &&
                 !atStartScreen && !atChapterSelect && !atTestSelect && !atOptionScreen && !atSoundMenu && !gameOver);
             if (background) background->update();
@@ -3891,7 +4351,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.17", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.18", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -3954,7 +4414,7 @@ private:
             if (mk.enter && !enterWas) {
                 if (testChapterSelection == 0) { chapterMgr.selectChapter(0); testAtChapterSelect = false; tJustEntered = true; }
                 else if (testChapterSelection == 1) {
-                    // Chapter 2: start side-scrolling demo immediately
+                    // Chapter 2: start sphere boss flow
                     chapterMgr.selectChapter(1);
                     resetGame(); atStartScreen = false; atTestSelect = false;
                     isNormalPlay = false;
@@ -3962,6 +4422,9 @@ private:
                     bulletMgr.updateParams(0);
                     shockwaveMgr.updateParams(0);
                     dmFireCooldown = 0;
+                    sphereBoss.init(sideBg, player);
+                    sphereBossActive = true;
+                    sphereBoss.startEntering();
                     tJustEntered = true;
                 }
             }
@@ -4075,7 +4538,6 @@ private:
                 if (score > 61) dialogueSys.history.add("Bryssa from Tower", {"Radar shows even more enemies! Watch out!"}, 1);
                 PH(70, "Ally (ai copilot)", {"System checking result:", "Aiming assist system on this plane.", "You shall find it somewhere."}, 3);
                 PH(80, "Ally (ai copilot)", {"I've lost contact with the tower!", "But you and the base can upgrade again soon."}, 2);
-                PH(90, "Ally (ai copilot)", {"We've gathered quite a lot of energy."}, 1);
                 PH(105, "", {"Tower communication restored."}, 1);
                 if (score > 105) {
                     dialogueSys.history.add("Tower (ai)", {"Massive energy signature detected.", "Analyzing source..."}, 2);
@@ -4288,7 +4750,7 @@ private:
             // TrainingPlane shooting (Chapter 1 original fire rate)
             if (dmFireCooldown > 0) dmFireCooldown--;
             if (shoot && dmFireCooldown <= 0) {
-                int nGuns = player->getGunCount();
+                int nGuns = nightElfEnergy.isTripleActive() ? 3 : player->getGunCount();
                 for (int g = 0; g < nGuns; ++g) {
                     int ox, oy;
                     player->getGunOffset(g, ox, oy);
@@ -4299,8 +4761,8 @@ private:
             bulletMgr.update(alienMgr.all());
             bulletMgr.removeInactive();
 
-            // ==== Ch2 test-mode controls (only active in TEST mode) ====
-            if (!isNormalPlay) {
+            // ==== Ch2 test-mode controls (disabled during sphere boss) ====
+            if (!isNormalPlay && !sphereBossActive) {
                 bool key1Now = keys[SDL_SCANCODE_1];
                 bool key2Now = keys[SDL_SCANCODE_2];
                 if (key1Now && !key1Was) { ch2AlienMgr.forceSpawn(); }
@@ -4308,9 +4770,43 @@ private:
                 key1Was = key1Now; key2Was = key2Now;
             }
             player->updateInvFrames();
-            ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr);
-            dmMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr);
+            ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr, playerHitCount);
+            dmMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr, playerHitCount);
             if (ch2GameOver) gameOver = true;
+
+            // Sphere boss update + scroll sync (only during ENTERING) + bg speed + bullet collision
+            if (sphereBossActive) {
+                if (sphereBoss.getState() == Ch2SphereBoss::ENTERING)
+                    sphereBoss.syncScreenPos(sideBg->getScrollX());
+                sphereBoss.update();
+                double ts = sphereBoss.getBgTargetSpeed();
+                if (ts >= 0 && sideBg) sideBg->setSpeed(ts);
+            }
+            if (sphereBossActive && sphereBoss.getState() == Ch2SphereBoss::FIGHT) {
+                for (auto& b : bulletMgr.all()) {
+                    if (!b.active || !b.canDamage) continue;
+                    double dx = b.x - sphereBoss.getCx();
+                    double dy = b.y - sphereBoss.getCy();
+                    if (dx*dx + dy*dy < sphereBoss.getRadius() * sphereBoss.getRadius()) {
+                        b.active = false;
+                        sphereBoss.takeDamage(1);
+                        sphereBoss.popDiamonds(1);
+                        playerHitCount++;
+                        particleMgr.spawnExplosion(b.x, b.y, 2);
+                    }
+                }
+            }
+
+            // NightElf energy: process all hits (managers + sphere boss), sounds
+            nightElfEnergy.update(playerHitCount);
+            if (nightElfEnergy.justEnteredTriple()) audio.sndTripleOn();
+            int tTimer = nightElfEnergy.getTripleTimer();
+            if (nightElfEnergy.isTripleActive() && tTimer <= 180 && tTimer > 0) {
+                int beepInterval = (tTimer > 120) ? 40 : (tTimer > 60) ? 25 : 12;
+                tripleBeepCounter++;
+                if (tripleBeepCounter >= beepInterval) { audio.sndTripleCountdown(); tripleBeepCounter = 0; }
+            } else { tripleBeepCounter = 0; }
+            playerHitCount = 0;
 
             floatingTextMgr.update();
             particleMgr.update();
@@ -4408,119 +4904,111 @@ private:
                 triggeredScores[0] = true;
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Martha, you're the only one in the air.");
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Hold on as long as you can. The base shockwave cannon is charging.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[3] && lastScore < 3 && score >= 3 && !dialogueSys.isActive()) {
                 triggeredScores[3] = true;
                 dialogueSys.queueDialogue("Ally (ai copilot)", "These enemies are made of energy.");
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Destroy them. We can collect the energy.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[15] && lastScore < 15 && score >= 15 && !dialogueSys.isActive()) {
                 triggeredScores[15] = true;
                 dialogueSys.queueDialogue("", "Tower communication restored.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[20] && lastScore < 20 && score >= 20 && !dialogueSys.isActive()) {
                 triggeredScores[20] = true;
                 dialogueSys.queueDialogue("Tower (ai)", "Shockwave cannon ready.");
                 dialogueSys.queueDialogue("Bryssa from Tower", "A little more energy!");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[30] && lastScore < 30 && score >= 30 && !dialogueSys.isActive()) {
                 triggeredScores[30] = true;
                 dialogueSys.queueDialogue("Tower (ai)", "Defense system charged.");
                 dialogueSys.queueDialogue("Tower (ai)", "More enemies incoming. Keep gathering energy.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[40] && lastScore < 40 && score >= 40 && !dialogueSys.isActive()) {
                 triggeredScores[40] = true;
-                dialogueSys.queueDialogue("Ally (ai copilot)", "Stay strong, Martha!");
                 dialogueSys.queueDialogue("Bryssa from Tower", "The trainer shares energy with the base.");
                 dialogueSys.queueDialogue("Bryssa from Tower", "You and the base will upgrade together.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[50] && lastScore < 50 && score >= 50 && !dialogueSys.isActive()) {
                 triggeredScores[50] = true;
                 dialogueSys.queueDialogue("Tower (ai)", "Keep gathering energy.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[55] && lastScore < 55 && score >= 55 && !dialogueSys.isActive()) {
                 triggeredScores[55] = true;
                 dialogueSys.queueDialogue("Ally (ai copilot)", "System checking.");
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Done.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[61] && lastScore < 61 && score >= 61 && !dialogueSys.isActive()) {
                 triggeredScores[61] = true;
                 dialogueSys.queueDialogue("Tower (ai)", "Base upgraded again.");
                 dialogueSys.queueDialogue("Bryssa from Tower", "Radar shows even more enemies! Watch out!");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[70] && lastScore < 70 && score >= 70 && !dialogueSys.isActive()) {
                 triggeredScores[70] = true;
                 dialogueSys.queueDialogue("Ally (ai copilot)", "System checking result:");
-                dialogueSys.queueDialogue("Ally (ai copilot)", "Aiming assist system on this plane.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Aim assist system on this plane.");
                 dialogueSys.queueDialogue("Ally (ai copilot)", "You shall find it somewhere.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[80] && lastScore < 80 && score >= 80 && !dialogueSys.isActive()) {
                 triggeredScores[80] = true;
                 dialogueSys.queueDialogue("Ally (ai copilot)", "I've lost contact with the tower!");
                 dialogueSys.queueDialogue("Ally (ai copilot)", "But you and the base can upgrade again soon.");
-                dialogueSys.start();
-            }
-            if (!triggeredScores[90] && lastScore < 90 && score >= 90 && !dialogueSys.isActive()) {
-                triggeredScores[90] = true;
-                dialogueSys.queueDialogue("Ally (ai copilot)", "We've gathered quite a lot of energy.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[105] && lastScore < 105 && score >= 105 && !dialogueSys.isActive()) {
                 triggeredScores[105] = true;
                 dialogueSys.queueDialogue("", "Tower communication restored.");
                 dialogueSys.queueDialogue("Tower (ai)", "Massive energy signature detected.");
                 dialogueSys.queueDialogue("Tower (ai)", "Analyzing source...");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[120] && lastScore < 120 && score >= 120 && !dialogueSys.isActive()) {
                 triggeredScores[120] = true;
                 dialogueSys.queueDialogue("Bryssa from Tower", "It's a capital ship.");
                 dialogueSys.queueDialogue("Bryssa from Tower", "Telamondo-class. Martha, this is what the defense system was built for.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[160] && lastScore < 160 && score >= 160 && !dialogueSys.isActive()) {
                 triggeredScores[160] = true;
                 dialogueSys.queueDialogue("Tower (ai)", "Enemy capital ship approaching.");
                 dialogueSys.queueDialogue("Tower (ai)", "Entering weapons range in 40 seconds.");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[180] && lastScore < 180 && score >= 180 && !dialogueSys.isActive()) {
                 triggeredScores[180] = true;
                 dialogueSys.queueDialogue("Bryssa from Tower", "Shockwave Defense System is fully charged");
                 dialogueSys.queueDialogue("Bryssa from Tower", "Martha, just keep them off us!");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[195] && lastScore < 195 && score >= 195 && !dialogueSys.isActive()) {
                 triggeredScores[195] = true;
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Here it comes...!");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (!triggeredScores[210] && lastScore < 210 && score >= 210 && !dialogueSys.isActive()) {
                 triggeredScores[210] = true;
                 dialogueSys.queueDialogue("Bryssa from Tower", "Base defense systems are strengthening.");
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Firepower systems being enhanced.");
-                dialogueSys.queueDialogue("Ally (ai copilot)", "Martha, full assault!");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             if (bossPhase2DialogueTriggered && !dialogueSys.isActive()) {
                 bossPhase2DialogueTriggered = false;
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Telamondo can absorb energy!");
                 dialogueSys.queueDialogue("Ally (ai copilot)", "Our firepower can match it!");
-                dialogueSys.queueDialogue("Ally (ai copilot)", "Keep up the full assault!");
-                dialogueSys.start();
+                dialogueSys.start(); lastScore = score;
             }
             } // chapter 1 dialogue triggers
-            lastScore = score;
+            if (!dialogueSys.isActive()) lastScore = score;
             dialogueSys.update(false);  // no ENTER skip for dialogue
             int ticks = dialogueSys.popTicks();
             const std::string& spk = dialogueSys.currentSpeaker();
@@ -4787,6 +5275,7 @@ private:
                     if (cur < 4) {
                         chapterMgr.selectChapter(cur + 1);
                         resetGame();
+                        atStartScreen = false;
                         isNormalPlay = true;
                         alienMgr.applyChapterConfig(chapterMgr.getConfig());
                         bulletMgr.updateParams(0);
@@ -4836,6 +5325,7 @@ private:
                 bulletMgr.draw(renderer.get());
             }
             if (isSide) {
+                if (sphereBossActive) sphereBoss.draw(renderer.get());
                 bulletMgr.draw(renderer.get());
                 player->draw(renderer.get()); drawWallFlash();
                 ch2AlienMgr.drawEnemy(renderer.get());
@@ -4845,7 +5335,32 @@ private:
                 // Ch2 HUD: all aligned to rightEdge = WIN_WIDTH - 10
                 HUDBase::drawScore(renderer.get(), font, score, WIN_WIDTH - 10, 10);
                 HUDBase::drawHPHearts(renderer.get(), font, ch2PlayerHP, 3, WIN_WIDTH - 10, 28);
-                HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, 0.0f);  // frozen for now
+                HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, 0.0f);  // green (placeholder)
+                // White energy bar below green
+                {
+                    float fill = nightElfEnergy.getFill();
+                    int wx = WIN_WIDTH - 10 - 10*14, wy = 54, ww = 10*14, wh = 6;
+                    SDL_SetRenderDrawColor(renderer.get(), 30, 30, 30, 255);
+                    SDL_Rect bg = {wx, wy, ww, wh}; SDL_RenderFillRect(renderer.get(), &bg);
+                    int fw = (int)(fill * ww); if (fw > ww) fw = ww;
+                    if (fw > 0) {
+                        bool triple = nightElfEnergy.isTripleActive();
+                        bool decaying = nightElfEnergy.isDecaying();
+                        bool charging = nightElfEnergy.isCharging();
+                        int rCol = 220, gCol = 220, bCol = 220; // default bright white
+                        if (triple) {
+                            // Glowing pulse during triple-fire
+                            int pulse = (int)(180 + 75 * std::sin(SDL_GetTicks() * 0.015));
+                            rCol = pulse; gCol = pulse; bCol = pulse;
+                        } else if (decaying) {
+                            rCol = 120; gCol = 120; bCol = 120; // dim white
+                        } else if (charging) {
+                            rCol = 240; gCol = 240; bCol = 240; // bright white
+                        }
+                        SDL_SetRenderDrawColor(renderer.get(), (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
+                        SDL_Rect fr = {wx, wy, fw, wh}; SDL_RenderFillRect(renderer.get(), &fr);
+                    }
+                }
                 if (!isNormalPlay) font.drawString(renderer.get(), "press 1/2", 10, 10, 2);
                 if (aimAssistOn) drawAimAssistSide();
             } else player->draw(renderer.get());

@@ -689,3 +689,28 @@ Ver 1.0.1 | 2026-05-08
       简化为独立 x/y 移动+速度缩放，移除透视线保持逻辑
     - BUGFIX: 第二章背景玻璃在画面内刷新 — genAhead 预生成边距 300→600，
       星点 wrap 边距 200→400
+
+  Ver 1.2.18 | 球体Boss战 + 夜精灵能量条 + 对话修复
+    - 新增 Ch2SphereBoss 球体Boss类：蓝色六角密铺菱形球体，7 状态机
+      （入场→激活→战斗→碎裂→震动→突袭飞散→结束），固定种子乱序碎裂，
+      菱形碎片物理（重力/落地/透视散落），碰撞检测（圆形判定）
+    - 球体入场动画：右侧滚动入场，背景随距离减速至静止
+    - 激活动画：菱形从下到上蓝→橙随机窗口逐个激活，~160 帧完成
+    - 受击碎片弹出：每发子弹命中弹出 1 个菱形，HP=500，HP=0 进入碎裂流程
+    - 碎裂→震动→突袭全流程：全菱形碎裂弹出后连锁震动传播(fade-in振幅→飞出)，
+      碎片向随机方向飞散消失
+    - 测试模式 Chapter 2 直接进入球体 Boss 入场流程（替代手动刷怪）
+    - 新增 NightElfEnergy 白色能量条系统：50 次命中蓄满，0.5s 无命中衰减，
+      蓄满触发 15 秒 triple-fire 三炮模式，最后 3 秒加速倒计时提示音
+    - 新增 sndTripleOn(crisp metallic ping) / sndTripleCountdown(short beep)
+    - 白色能量条 HUD 绘制在绿色能量条下方，triple 脉冲/充能/衰减三色态
+    - NightElf 枪数降至 1（triple-fire 激活时覆盖为 3 炮）
+    - 能量命中追踪链：manager 更新+球体碰撞→统一汇总→energy.update→命中清零
+    - 对话触发防级联：每个触发点同步设置 lastScore=score，帧级仅在无对话时更新
+    - 对话内容精简：移除 Score 40/90/210 部分台词，Score 70 措辞修正
+    - BGM 静音范围扩大：章节选择/测试选择/设置/音效菜单/任务完成全部静音
+    - BUGFIX: 对话级联触发 — lastScore 在各触发点同步更新+帧级加对话活跃守卫
+    - BUGFIX: 历史焦点需按两次上键 — focusSlot 在 resetView/moveUp/moveDown
+      中钳制至 maxSlot
+    - BUGFIX: NEXT CHAPTER 回到开始画面 — resetGame()后设置 atStartScreen=false
+    - BUGFIX: 部分菜单未静音 — BGM off 条件覆盖全部非游戏界面

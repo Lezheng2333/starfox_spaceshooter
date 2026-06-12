@@ -164,6 +164,14 @@ struct Ch2EnemyBullet {
     int hp; bool active;
 };
 
+// === Chapter 2 pulse wave ===
+struct Ch2PulseWave {
+    double x, y;      // origin center (player position at release)
+    double radius;    // current radius
+    int id;           // unique ID for per-enemy collision tracking
+    bool active;
+};
+
 // === Chapter 2 danmaku data structures ===
 struct Ch2DanmakuEnemy : EnemyData {
     double x, y;          // current center position
@@ -177,6 +185,7 @@ struct Ch2DanmakuEnemy : EnemyData {
     int fireInterval;      // frames between spiral shots
     double fireAngle;      // current spiral angle
     int defeatTimer;       // countdown after defeat for animation
+    int lastHitByPulse;    // pulse wave ID already applied to this enemy
 };
 
 
@@ -3489,13 +3498,19 @@ public:
             font.drawChar(r, '*', hx, y, 2);
         }
     }
-    static void drawEnergyBar(SDL_Renderer* r, int rightEdge, int y, int w, int h, float fill) {
+    static void drawEnergyBar(SDL_Renderer* r, int rightEdge, int y, int w, int h, float fill, bool breathing = false) {
         int x = rightEdge - w;
         SDL_SetRenderDrawColor(r, 30, 30, 30, 255);
         SDL_Rect bg = {x, y, w, h}; SDL_RenderFillRect(r, &bg);
         int fw = (int)(fill * w); if (fw > w) fw = w;
         if (fw > 0) {
-            int green = (fill > 0.9f) ? 255 : (fill > 0.3f ? 180 : 100);
+            int green;
+            if (breathing) {
+                float b = 0.6f + 0.4f * (float)std::sin(SDL_GetTicks() * 0.008);
+                green = (int)(60 + 195 * b);
+            } else {
+                green = (fill > 0.9f) ? 255 : (fill > 0.3f ? 180 : 100);
+            }
             SDL_SetRenderDrawColor(r, 30, (Uint8)green, 50, 255);
             SDL_Rect fr = {x, y, fw, h}; SDL_RenderFillRect(r, &fr);
         }
@@ -3556,6 +3571,7 @@ public:
         e.fireTimer = 0; e.fireInterval = 6;
         e.fireAngle = 0;
         e.defeatTimer = 0;
+        e.lastHitByPulse = -1;
         enemies.push_back(e);
     }
 
@@ -3712,6 +3728,7 @@ public:
 struct Ch2Alien : EnemyData {
     double x, y, startX, startY, targetX, targetY;
     int fireVolleyTimer, fireBurstCount, fireBurstTimer;
+    int lastHitByPulse;  // pulse wave ID already applied
 };
 
 class Ch2AlienManager : public Ch2ShooterBase {
@@ -3746,6 +3763,7 @@ class Ch2AlienManager : public Ch2ShooterBase {
         a.enterFrame = 0; a.enterDuration = 20 + rand() % 26;
         a.invincibleFrames = 0;
         a.fireVolleyTimer = 0; a.fireBurstCount = 0; a.fireBurstTimer = 0;
+        a.lastHitByPulse = -1;
         aliens.push_back(a);
     }
 
@@ -3852,6 +3870,391 @@ public:
 
 
 // ============== ChapterManager ==============
+// ============== Ch2SkillOrb (floating skill orb → shield break → core → absorption) ==============
+struct ShieldDebris {
+    double sx, sy, vx, vy;
+    int life;
+};
+
+class Ch2SkillOrb {
+public:
+    enum State { INACTIVE, FLOATING, CORE, ABSORBING, ABSORBED };
+    double x, y, vx, vy;
+    double radius;       // 14px
+    int shieldHp;        // 18 hits to break
+    bool shieldBroken;
+    State state;
+    int absorbTimer;
+    std::vector<ShieldDebris> shieldDebris;
+
+    Ch2SkillOrb() : x(0), y(0), vx(0), vy(0), radius(14.0), shieldHp(18), shieldBroken(false),
+                    state(INACTIVE), absorbTimer(0) {}
+
+    void spawn(double sx, double sy) {
+        x = sx; y = sy;
+        vx = 0.6 + (rand()%80)/100.0;  // 0.6–1.4 px/frame
+        vy = 0.8 + (rand()%60)/100.0;  // 0.8–1.4 px/frame
+        if (rand()%2) vx = -vx; if (rand()%2) vy = -vy;
+        radius = 14.0;
+        shieldHp = 18; shieldBroken = false;
+        shieldDebris.clear();
+        state = FLOATING;
+        absorbTimer = 0;
+    }
+
+    void update() {
+        if (state == INACTIVE || state == ABSORBED) return;
+        // Update shield debris
+        for (auto& d : shieldDebris) {
+            d.sx += d.vx; d.sy += d.vy;
+            d.vx *= 0.96; d.vy *= 0.96;
+            d.life--;
+        }
+        shieldDebris.erase(std::remove_if(shieldDebris.begin(), shieldDebris.end(),
+            [](const ShieldDebris& d){ return d.life <= 0; }), shieldDebris.end());
+
+        if (state == FLOATING) {
+            x += vx; y += vy;
+            if (x - radius < 10.0)  { x = 10.0 + radius; vx = std::abs(vx);  bounceAngle(false); }
+            if (x + radius > 790.0) { x = 790.0 - radius; vx = -std::abs(vx); bounceAngle(true); }
+            if (y - radius < 10.0)  { y = 10.0 + radius; vy = std::abs(vy);  bounceAngle(false); }
+            if (y + radius > 590.0) { y = 590.0 - radius; vy = -std::abs(vy); bounceAngle(false); }
+        }
+    }
+
+    void tickAbsorb() {
+        if (state != ABSORBING) return;
+        absorbTimer--;
+        if (absorbTimer <= 0) state = ABSORBED;
+    }
+
+    void stopAbsorb() {
+        if (state != ABSORBING) return;
+        state = CORE;  // back to core if player releases Shift
+    }
+
+    void registerHit(ParticleManager& pm, AudioEngine& audio) {
+        if (state != FLOATING || shieldBroken) return;
+        shieldHp--;
+        // Bullet shatter effect at impact point
+        double ix = x + (rand()%12-6), iy = y + (rand()%12-6);
+        pm.spawnExplosion(ix, iy, 6);
+        for (int i = 0; i < 10; ++i) {
+            double a = rand() % 6283 / 1000.0;
+            double sp = 2.0 + (rand() % 300) / 100.0;
+            pm.spawnWhiteParticle(ix, iy, std::cos(a)*sp, std::sin(a)*sp, 12+rand()%15);
+        }
+        audio.sndHit();
+        if (shieldHp <= 0) breakShield(pm);
+    }
+
+    void breakShield(ParticleManager& pm) {
+        shieldBroken = true;
+        state = CORE;
+        radius = 12.0;
+        vx = 0; vy = 0;
+        // 18-gon segments fly outward
+        for (int i = 0; i < 18; ++i) {
+            ShieldDebris d;
+            double a = 2.0 * M_PI * i / 18.0;
+            d.sx = x + 16.0 * std::cos(a);
+            d.sy = y + 16.0 * std::sin(a);
+            double speed = 1.5 + (rand()%250)/100.0;
+            double spread = a + (rand()%30-15)*M_PI/180.0;
+            d.vx = std::cos(spread) * speed;
+            d.vy = std::sin(spread) * speed;
+            d.life = 25 + rand() % 20;
+            shieldDebris.push_back(d);
+        }
+        pm.spawnExplosion(x, y, 12);
+    }
+
+    void startAbsorb() {
+        if (state != CORE) return;
+        state = ABSORBING;
+        absorbTimer = 300; // 5 seconds
+    }
+
+    bool isActive() const { return state != INACTIVE && state != ABSORBED; }
+    bool isCore() const { return state == CORE || state == ABSORBING; }
+    bool pulseUnlocked() const { return state == ABSORBED; }
+    void reset() { state = INACTIVE; shieldDebris.clear(); shieldBroken = false; }
+
+    void draw(SDL_Renderer* r) const {
+        if (state == INACTIVE || state == ABSORBED) return;
+        int cx = (int)x, cy = (int)y;
+        // Shield debris
+        for (const auto& d : shieldDebris) {
+            int alpha = std::min(255, d.life * 10);
+            SDL_SetRenderDrawColor(r, 220, 220, 255, (Uint8)alpha);
+            SDL_RenderDrawLine(r, (int)d.sx, (int)d.sy, (int)(d.sx-d.vx*2), (int)(d.sy-d.vy*2));
+        }
+        // Shield shell (18-gon) — only when floating and not broken
+        if (state == FLOATING && !shieldBroken) {
+            double shR = radius + 5.0;
+            SDL_Point poly[18];
+            for (int i = 0; i < 18; ++i) {
+                double a = 2.0 * M_PI * i / 18.0;
+                poly[i] = {(int)(cx + shR * std::cos(a)), (int)(cy + shR * std::sin(a))};
+            }
+            int hullAlpha = 120 + (int)((double)shieldHp / 18.0 * 110);
+            // Draw 3x to make thick visible lines
+            for (int pass = 0; pass < 3; ++pass) {
+                SDL_SetRenderDrawColor(r, 230, 230, 255, (Uint8)(hullAlpha / (pass+1)));
+                for (int i = 0; i < 17; ++i)
+                    SDL_RenderDrawLine(r, poly[i].x, poly[i].y, poly[i+1].x, poly[i+1].y);
+                SDL_RenderDrawLine(r, poly[17].x, poly[17].y, poly[0].x, poly[0].y);
+            }
+            // Vertex dots
+            SDL_SetRenderDrawColor(r, 255, 255, 255, (Uint8)hullAlpha);
+            for (int i = 0; i < 18; ++i) {
+                SDL_RenderDrawPoint(r, poly[i].x, poly[i].y);
+                SDL_RenderDrawPoint(r, poly[i].x-1, poly[i].y);
+                SDL_RenderDrawPoint(r, poly[i].x+1, poly[i].y);
+                SDL_RenderDrawPoint(r, poly[i].x, poly[i].y-1);
+                SDL_RenderDrawPoint(r, poly[i].x, poly[i].y+1);
+            }
+        }
+        // Inner glow core: pale yellow center → white edge (multi-layer feathering)
+        int rsz = (int)radius;
+        // Outer glow: 6 feathered layers with decreasing alpha
+        for (int layer = 5; layer >= 0; --layer) {
+            int lr = rsz + 4 + layer * 3;
+            int al = 10 + layer * 25;  // 10, 35, 60, 85, 110, 135
+            SDL_SetRenderDrawColor(r, 255, 255, (Uint8)(180 + layer * 12), (Uint8)al);
+            int steps = 12 + layer * 4;
+            for (int i = 0; i < steps; ++i) {
+                double a = 2.0 * M_PI * i / steps;
+                SDL_RenderDrawPoint(r, cx+(int)(lr*std::cos(a)), cy+(int)(lr*std::sin(a)));
+            }
+        }
+        // Main core fill (yellow-white breathing, with edge gradient)
+        int br = 180 + (int)(40 * std::sin(SDL_GetTicks() * 0.010));
+        if (state == CORE || state == ABSORBING) {
+            br = 180 + (int)(75 * std::sin(SDL_GetTicks() * 0.015));
+        }
+        for (int dy = -rsz; dy <= rsz; ++dy) {
+            int dx = (int)std::sqrt((double)std::max(0, rsz*rsz - dy*dy));
+            double edgeFrac = std::abs(dy) / (double)rsz;
+            // Breathing brightness fades toward edges
+            int rv = (int)(br - edgeFrac * 60 + 40);
+            int gv = (int)(br - edgeFrac * 60 + 40);
+            int bv = (int)(std::max(20, br/3 - (int)(edgeFrac * 30)));
+            int al = (int)(240 - edgeFrac * 80);
+            SDL_SetRenderDrawColor(r, (Uint8)rv, (Uint8)gv, (Uint8)bv, (Uint8)al);
+            SDL_RenderDrawLine(r, cx-dx, cy+dy, cx+dx, cy+dy);
+        }
+        // Central hot dot
+        SDL_SetRenderDrawColor(r, 255, 255, 220, 255);
+        for (int i = 0; i < 12; ++i) {
+            double a = i * M_PI / 6.0;
+            SDL_RenderDrawPoint(r, cx+(int)(2*std::cos(a)), cy+(int)(2*std::sin(a)));
+        }
+        SDL_RenderDrawPoint(r, cx, cy);
+    }
+
+private:
+    void bounceAngle(bool hitRight) {
+        double speed = std::sqrt(vx*vx + vy*vy);
+        if (speed < 0.3) { vx *= 2.0; vy *= 2.0; speed *= 2.0; }
+        double angle = (45.0 + (rand()%46)) * M_PI / 180.0; // 45–90°
+        double sx = hitRight ? -1.0 : 1.0;
+        vx = std::cos(angle) * speed * sx;
+        vy = std::sin(angle) * speed * (vy > 0 ? 1.0 : -1.0);
+    }
+};
+
+// ============== Ch2PulseSystem (green energy bar + Shift pulse) ==============
+class Ch2PulseSystem {
+public:
+    static const int MAX_ENERGY = 30;
+
+    int energy;
+    bool unlocked;      // false until skill orb absorbed
+    bool draining;      // true when energy is rapidly draining after absorption cancel
+
+    std::vector<Ch2PulseWave> waves;
+    int nextWaveID;
+
+    Ch2PulseSystem() : energy(0), unlocked(false), draining(false), nextWaveID(0) {}
+
+    void reset() {
+        energy = 0; unlocked = false; draining = false;
+        waves.clear(); nextWaveID = 0;
+    }
+
+    void addEnergy(int hits) {
+        if (!unlocked) return;
+        if (hits <= 0) return;
+        energy += hits;
+        if (energy > MAX_ENERGY) energy = MAX_ENERGY;
+    }
+
+    void addAbsorbEnergy() {
+        // Gradually fill during orb absorption (target: 30 over 300 frames = every 10 frames)
+        energy += 1;
+        if (energy > MAX_ENERGY) energy = MAX_ENERGY;
+    }
+
+    void startDrain() { draining = true; }
+    bool isDraining() const { return draining; }
+
+    bool canAbsorb() const { return !draining && energy == 0; }
+
+    void drainTick() {
+        if (!draining) return;
+        energy -= 3;
+        if (energy <= 0) { energy = 0; draining = false; }
+    }
+
+    float getFill() const {
+        return (float)energy / MAX_ENERGY;
+    }
+
+    bool isFull() const { return unlocked && energy >= MAX_ENERGY; }
+
+    // Breathing: bright green ↔ dark green when full (for HUD rendering)
+    float getBreathAlpha() const {
+        if (!isFull()) return 1.0f;
+        return 0.6f + 0.4f * (float)std::sin(SDL_GetTicks() * 0.008);
+    }
+
+    void release(double px, double py, ParticleManager& pm, AudioEngine& audio) {
+        energy = 0; // consume all energy
+
+        Ch2PulseWave w;
+        w.x = px; w.y = py;
+        w.radius = 20.0;
+        w.id = nextWaveID++;
+        w.active = true;
+        waves.push_back(w);
+
+        // White particle burst (similar to Ch1 base shockwave)
+        for (int i = 0; i < 50; ++i) {
+            double angle = (rand() % 360) * M_PI / 180.0;
+            double speed = 2.0 + (rand() % 500) / 100.0;
+            pm.spawnWhiteParticle(px, py,
+                std::cos(angle) * speed,
+                std::sin(angle) * speed,
+                20 + rand() % 30);
+        }
+        audio.sndShockwave();
+    }
+
+    void update() {
+        // Update expanding shockwave rings
+        for (auto& w : waves) {
+            if (!w.active) continue;
+            w.radius += 8.0;
+            if (w.radius > 520.0) w.active = false;
+        }
+        waves.erase(std::remove_if(waves.begin(), waves.end(),
+            [](const Ch2PulseWave& w){ return !w.active; }), waves.end());
+    }
+
+    void draw(SDL_Renderer* r) const {
+        for (const auto& w : waves) {
+            if (!w.active) continue;
+            double progress = (w.radius - 20.0) / 500.0; // 0→1 over life
+            if (progress > 1.0) progress = 1.0;
+            int alpha = (int)(220.0 * (1.0 - progress)); if (alpha < 10) alpha = 10;
+            SDL_SetRenderDrawColor(r, 255, 255, 255, (Uint8)alpha);
+            const int SEG = 64;
+            SDL_Point prev;
+            int cx = (int)w.x, cy = (int)w.y;
+            for (int i = 0; i <= SEG; ++i) {
+                double a = 2.0 * M_PI * i / SEG;
+                int sx = cx + (int)(w.radius * std::cos(a));
+                int sy = cy + (int)(w.radius * std::sin(a));
+                if (i > 0) SDL_RenderDrawLine(r, prev.x, prev.y, sx, sy);
+                prev = {sx, sy};
+            }
+            // Second ring (thinner, slightly smaller)
+            double r2 = w.radius * 0.85;
+            int alpha2 = (int)(140.0 * (1.0 - progress)); if (alpha2 < 8) alpha2 = 8;
+            SDL_SetRenderDrawColor(r, 255, 255, 255, (Uint8)alpha2);
+            for (int i = 0; i <= SEG; ++i) {
+                double a = 2.0 * M_PI * i / SEG;
+                int sx = cx + (int)(r2 * std::cos(a));
+                int sy = cy + (int)(r2 * std::sin(a));
+                if (i > 0) SDL_RenderDrawLine(r, prev.x, prev.y, sx, sy);
+                prev = {sx, sy};
+            }
+        }
+    }
+
+    // Collision: pulse vs enemy bullets → destroy all bullets in radius
+    void collideWithBullets(std::vector<Ch2EnemyBullet>& bullets, ParticleManager& pm) {
+        for (auto& w : waves) {
+            if (!w.active) continue;
+            for (auto& b : bullets) {
+                if (!b.active) continue;
+                double dx = b.x - w.x, dy = b.y - w.y;
+                if (dx*dx + dy*dy < (w.radius+4.0)*(w.radius+4.0)) {
+                    b.active = false;
+                    pm.spawnExplosion(b.x, b.y, 2);
+                }
+            }
+        }
+    }
+
+    // Collision: pulse vs Ch2 alien enemies
+    void collideWithAliens(Ch2AlienManager& am, ParticleManager& pm, AudioEngine& audio,
+                           int& score, int& hitCount) {
+        for (auto& w : waves) {
+            if (!w.active) continue;
+            auto& aliens = const_cast<std::vector<Ch2Alien>&>(am.getAliens());
+            for (auto& a : aliens) {
+                if (!a.active) continue;
+                if (a.lastHitByPulse == w.id) continue;
+                double dx = a.x - w.x, dy = a.y - w.y;
+                if (dx*dx + dy*dy < (w.radius+22.0)*(w.radius+22.0)) {
+                    a.lastHitByPulse = w.id;
+                    a.hp -= 1; hitCount++;
+                    pm.spawnExplosion(a.x, a.y, 4);
+                    audio.sndShockwaveHit();
+                    if (a.hp <= 0) {
+                        a.defeated = true; a.active = false;
+                        pm.spawnExplosion(a.x, a.y, 20);
+                        pm.spawnExplosion(a.x-8, a.y-4, 12);
+                        pm.spawnExplosion(a.x+8, a.y+4, 12);
+                        audio.sndExplosionSmall(); score += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Collision: pulse vs danmaku enemies
+    void collideWithDanmaku(Ch2DanmakuManager& dm, ParticleManager& pm, AudioEngine& audio,
+                            int& score, int& hitCount) {
+        for (auto& w : waves) {
+            if (!w.active) continue;
+            auto& enemies = const_cast<std::vector<Ch2DanmakuEnemy>&>(dm.getEnemies());
+            for (auto& e : enemies) {
+                if (!e.active || e.entering) continue;
+                if (e.lastHitByPulse == w.id) continue;
+                if (e.defeated && e.defeatTimer > 0) continue;
+                double dx = e.x - w.x, dy = e.y - w.y;
+                double hitR = e.nearLeg + 10.0;
+                if (dx*dx + dy*dy < (w.radius+hitR)*(w.radius+hitR)) {
+                    e.lastHitByPulse = w.id;
+                    e.hp -= 1; hitCount++;
+                    pm.spawnExplosion(e.x, e.y, 4);
+                    audio.sndShockwaveHit();
+                    if (e.hp <= 0) {
+                        e.defeated = true; e.invincibleFrames = 300;
+                        e.defeatTimer = 70;
+                        score += 5;
+                        pm.spawnExplosion(e.x, e.y, 20);
+                        audio.sndExplosionSmall();
+                    }
+                }
+            }
+        }
+    }
+};
+
 class ChapterManager {
     int currentIdx;
     bool unlocked[5];
@@ -4176,13 +4579,17 @@ class Game {
     NightElfEnergy nightElfEnergy;
     int playerHitCount;
     int tripleBeepCounter;
+    Ch2PulseSystem pulseSystem;
+    Ch2SkillOrb skillOrb;
+    bool pulseOrbDropped; // first danmaku has dropped the orb
+    bool shiftWas;        // Shift key edge detection
+    bool shiftJustPressed; // true for one frame when Shift first pressed
 
     // Timing
     Uint32 lastTime;
 
     // Edge detection helpers for menus
     bool upWas, downWas, enterWas, escWas, leftWas, rightWas;
-    bool key1Was, key2Was;  // test-mode enemy spawn edge detection
     int autoSpawnPhase;    // 0=idle,1=spawnW1(3),2=fightW1,3=spawnW2(5),4=fightW2,5=wave3,6=danmaku+done
     int autoSpawnQueued;   // aliens left to spawn in current spawning phase
     int autoSpawnTimer;    // countdown frames to next spawn (0.2s=12)
@@ -4215,8 +4622,9 @@ public:
           ch2PlayerHP(3), ch2GameOver(false),
           ch2AlienMgr(ch2PlayerHP, ch2GameOver), dmMgr(ch2PlayerHP, ch2GameOver),
           dmFireCooldown(0), sphereBossActive(false), playerHitCount(0), tripleBeepCounter(0),
+          pulseOrbDropped(false), shiftWas(true), shiftJustPressed(false),
           lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
-          leftWas(false), rightWas(false), key1Was(false), key2Was(false),
+          leftWas(false), rightWas(false),
           autoSpawnPhase(0), autoSpawnQueued(0), autoSpawnTimer(0),
           autoSpawnWave3Reinf(0), autoSpawnScoreBase(0),
           autoSpawnAliveLast(0), autoSpawnKillsLast(0),
@@ -4268,6 +4676,7 @@ public:
         ch2AlienMgr.reset(); dmMgr.reset(); dmFireCooldown = 0;
         sphereBoss.reset(); sphereBossActive = false;
         nightElfEnergy.reset(); playerHitCount = 0; tripleBeepCounter = 0;
+        pulseSystem.reset(); skillOrb.reset(); pulseOrbDropped = false; shiftWas = true;
         autoSpawnPhase = 0; autoSpawnQueued = 0; autoSpawnTimer = 0;
         autoSpawnWave3Reinf = 0; autoSpawnScoreBase = 0;
         autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
@@ -4424,7 +4833,7 @@ private:
         }
         font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.19", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.20", 15, WIN_HEIGHT - 30, 2);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -4494,7 +4903,7 @@ private:
         } else {
             // Level 2: sub-menu for selected chapter
             bool isCh2 = chapterMgr.getConfig().isSideScrolling;
-            int maxSel = isCh2 ? 1 : 9;
+            int maxSel = isCh2 ? 2 : 9;
             if (mk.esc && !escWas) { testAtChapterSelect = true; tJustEntered = true; }
             if (mk.up && !upWas && testScoreSelection > 0)     testScoreSelection--;
             if (mk.down && !downWas && testScoreSelection < maxSel) testScoreSelection++;
@@ -4513,9 +4922,13 @@ private:
                     sphereBoss.init(sideBg, player);
                     sphereBossActive = true;
                     sphereBoss.startEntering();
-                } else {
+                } else if (savedSel == 1) {
                     // Option 1: Skip to combat (boss done, auto-spawn wave 1)
                     autoSpawnPhase = 1; autoSpawnQueued = 3; autoSpawnTimer = 0;
+                } else {
+                    // Option 2: Score 25 + first danmaku spawn (for pulse orb testing)
+                    score = 25; autoSpawnPhase = 6; autoSpawnScoreBase = 0;
+                    dmMgr.spawnEnemy();
                 }
                 tJustEntered = true; return;
             }
@@ -4672,9 +5085,9 @@ private:
                 font.drawString(r, "TEST - CHAPTER 2", CENTER_X - 192, 50, 4);
                 SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
                 SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
-                const char* labels[2] = {"SPHERE BOSS FULL", "COMBAT ONLY"};
-                const int MENU_Y0 = 160, GAP = 56;
-                for (int i = 0; i < 2; ++i) {
+                const char* labels[3] = {"SPHERE BOSS FULL", "COMBAT ONLY", "PULSE ORB TEST"};
+                const int MENU_Y0 = 140, GAP = 52;
+                for (int i = 0; i < 3; ++i) {
                     int itemW = (int)strlen(labels[i]) * 6 * 3;
                     int itemX = CENTER_X - itemW / 2;
                     int itemY = MENU_Y0 + i * GAP;
@@ -4845,7 +5258,8 @@ private:
             if (py > WIN_HEIGHT - 10) py = WIN_HEIGHT - 10;
 
             int noseX = px + player->getNoseOffset();
-            if (noseX > 642) {
+            // Energy wall only during combat (after auto-spawn begins)
+            if (autoSpawnPhase > 0 && noseX > 642) {
                 px = 642 - player->getNoseOffset();
                 wallFlashTimer = 28; wallContactY = py; wallAnimFrame++;
             } else if (wallFlashTimer > 0) { wallFlashTimer--; wallAnimFrame++; }
@@ -4951,6 +5365,95 @@ private:
                     }
                 }
             }
+
+            // ==== Pulse energy / skill orb / Shift input ====
+            bool shiftNow = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
+            shiftJustPressed = (shiftNow && !shiftWas);
+            shiftWas = shiftNow;
+
+            // Energy fill from bullet hits this frame
+            pulseSystem.addEnergy(playerHitCount);
+            playerHitCount = 0;
+
+            // Skill orb: spawn on first danmaku defeat (after defeat animation ends)
+            if (!pulseOrbDropped && !pulseSystem.unlocked) {
+                for (const auto& de : dmMgr.getEnemies()) {
+                    if (de.defeated && de.defeatTimer == 1) { // last frame of defeat animation
+                        skillOrb.spawn(de.x, de.y);
+                        pulseOrbDropped = true;
+                        break;
+                    }
+                }
+            }
+
+            // Skill orb: update + bullet collision (shield break after 18 hits)
+            if (skillOrb.isActive()) {
+                skillOrb.update();
+                if (skillOrb.state == Ch2SkillOrb::FLOATING) {
+                    for (auto& b : bulletMgr.all()) {
+                        if (!b.active || !b.canDamage) continue;
+                        double dx = b.x - skillOrb.x, dy = b.y - skillOrb.y;
+                        double hitR = skillOrb.radius + 5.0;
+                        if (dx*dx + dy*dy < hitR*hitR) {
+                            b.active = false; b.canDamage = false;
+                            skillOrb.registerHit(particleMgr, audio);
+                            break; // one hit per frame
+                        }
+                    }
+                }
+                // Orb absorption: hold Shift near core for 5 sec → fill energy bar
+                // Release Shift during absorption → energy rapidly drains to 0 before retry
+                if (skillOrb.isCore() && !skillOrb.pulseUnlocked()) {
+                    double dx = skillOrb.x - player->getX();
+                    double dy = skillOrb.y - player->getY();
+                    bool nearPlayer = (dx*dx + dy*dy < 200.0*200.0);
+                    // Drain energy to 0 if player released Shift or moved away
+                    if (skillOrb.state == Ch2SkillOrb::ABSORBING && (!shiftNow || !nearPlayer) && !pulseSystem.isDraining()) {
+                        skillOrb.stopAbsorb();
+                        pulseSystem.startDrain();
+                    }
+                    // Start absorption: must be CORE, holding Shift, near player, energy at 0
+                    if (skillOrb.state == Ch2SkillOrb::CORE && shiftNow && nearPlayer && pulseSystem.canAbsorb()) {
+                        skillOrb.startAbsorb();
+                    }
+                    // Continuing absorption: each frame tick timer + fill energy
+                    if (skillOrb.state == Ch2SkillOrb::ABSORBING && shiftNow && nearPlayer) {
+                        skillOrb.tickAbsorb();
+                        if (skillOrb.absorbTimer % 10 == 0) pulseSystem.addAbsorbEnergy();
+                        for (int i = 0; i < 5; ++i) {
+                            double sx = skillOrb.x + (rand()%14-7);
+                            double sy = skillOrb.y + (rand()%14-7);
+                            double vx = (player->getX() - sx) * 0.05 + (rand()%40-20)/15.0;
+                            double vy = (player->getY() - sy) * 0.05 + (rand()%40-20)/15.0;
+                            particleMgr.spawnWhiteParticle(sx, sy, vx, vy, 18 + rand() % 25);
+                        }
+                        if (skillOrb.pulseUnlocked()) {
+                            pulseSystem.unlocked = true;
+                            pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY; // snap to full
+                            autoSpawnQueued += 10;
+                        }
+                    }
+                    // Energy drain: -3 per frame until 0
+                    if (pulseSystem.isDraining()) {
+                        pulseSystem.drainTick();
+                    }
+                }
+            }
+
+            // Pulse release: single Shift press when energy full
+            if (pulseSystem.unlocked && pulseSystem.isFull() && shiftJustPressed) {
+                pulseSystem.release((float)player->getX(), (float)player->getY(), particleMgr, audio);
+            }
+            pulseSystem.update();
+
+            // Pulse wave collision: destroy all enemy bullets
+            pulseSystem.collideWithBullets(
+                const_cast<std::vector<Ch2EnemyBullet>&>(ch2AlienMgr.getBullets()), particleMgr);
+            pulseSystem.collideWithBullets(
+                const_cast<std::vector<Ch2EnemyBullet>&>(dmMgr.getBullets()), particleMgr);
+            // Pulse wave collision: 1 damage per enemy per wave
+            pulseSystem.collideWithAliens(ch2AlienMgr, particleMgr, audio, score, playerHitCount);
+            pulseSystem.collideWithDanmaku(dmMgr, particleMgr, audio, score, playerHitCount);
 
             floatingTextMgr.update();
             particleMgr.update();
@@ -5471,15 +5974,21 @@ private:
             if (isSide) {
                 if (sphereBossActive) sphereBoss.draw(renderer.get());
                 bulletMgr.draw(renderer.get());
-                player->draw(renderer.get()); drawWallFlash();
+                player->draw(renderer.get());
+                drawWallFlash();
                 ch2AlienMgr.drawEnemy(renderer.get());
                 ch2AlienMgr.drawBullets(renderer.get());
                 dmMgr.drawEnemy(renderer.get());
                 dmMgr.drawBullets(renderer.get());
+                // Pulse waves on top of enemies
+                pulseSystem.draw(renderer.get());
+                skillOrb.draw(renderer.get());
                 // Ch2 HUD: all aligned to rightEdge = WIN_WIDTH - 10
                 HUDBase::drawScore(renderer.get(), font, score, WIN_WIDTH - 10, 10);
                 HUDBase::drawHPHearts(renderer.get(), font, ch2PlayerHP, 3, WIN_WIDTH - 10, 28);
-                HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 3*14, 6, 0.0f);  // green (placeholder)
+                float eFill = pulseSystem.getFill();
+                HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 10*14, 6,
+                    eFill, pulseSystem.isFull());
                 if (aimAssistOn) drawAimAssistSide();
             } else player->draw(renderer.get());
 

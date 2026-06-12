@@ -734,3 +734,25 @@ Ver 1.0.1 | 2026-05-08
       将spawn pump从phase-gated改为queue-driven（if autoSpawnQueued>0）
     - BUGFIX: Wave 3逃逸检测无限刷新 — expectedAlive公式累积重复计算，
       改为帧间delta（aliveLost-killsGained）
+
+  Ver 1.2.20 | 脉冲技能系统 + 技能球获取流程
+    - 新增 Ch2PulseSystem 脉冲技能系统：
+      - 绿色能量条与白色能量条等长（10*14px），30格容量，命中敌人+1格
+      - 能量满后HUD呼吸动画（亮绿↔暗绿），按一次Shift即释放全屏白色冲击波
+      - 冲击波双层同心圆扩散（8px/帧），碰撞清屏弹幕+对敌人1伤害
+      - 碰撞ID机制（Ch1Shockwave同款）：每波唯一ID，lastHitByPulse防重复伤害
+    - 新增 Ch2SkillOrb 技能球获取流程：
+      - 击败第一个弹幕敌人→动画结束后原地生成漂浮技能球
+      - 技能球缓慢漂浮（边界反弹），包裹18边形白色保护罩（18次命中击碎）
+      - 子弹命中护罩有碎裂粒子特效+音效，一次性全部碎开向外飞散渐隐
+      - 护罩碎后显现金黄色发光核心（多层羽化边缘），按住Shift靠近吸收
+      - 吸收持续5秒，期间粒子从核心飞向玩家，松开Shift能量快速流失归零
+      - 吸收完成解锁脉冲技能，同时刷10只普敌供玩家体验
+    - 吸收期间绿色能量条同步增长（每10帧+1格，300帧刚好满30）
+    - 测试模式新增第三入口 PULSE ORB TEST（分数25+弹幕敌人，直接测试技能球流程）
+    - 隐形能量墙限制条件优化：仅在战斗阶段（autoSpawnPhase>0）生效
+    - 清理死代码：charge蓄力机制残留（charging/chargeTimer/shakePhase）、
+      key1Was/key2Was手动刷怪变量残留
+    - BUGFIX: 能量满后按Shift无反应 — release()残留charge守卫条件导致脉冲从不释放
+    - BUGFIX: 吸收时能量条不增长 — getFill()的unlocked门控在吸收期间锁0%
+    - BUGFIX: 吸收时能量条不增长重新修复 — getFill()彻底移除unlocked门控

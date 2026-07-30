@@ -3,8 +3,8 @@
 ## 项目信息
 
 - **语言**：C++11, SDL2
-- **源码**：`v2.0.0/multiple code files/`（27 个头文件 + 1 个 main.cpp）\
-  旧单文件版本仍保留在 `v2.0.0/space_shooting ver2.0.0 developing.cpp` 作为参考
+- **源码**：`v2.0.0/multiple code files/`（28 个头文件 + 1 个 main.cpp = 29 个文件）\
+  旧单文件存档：`v2.0.0/space_shooting ver1.2.20 single-file archive.cpp`
 - **编译命令**：
   ```bash
   cd "v2.0.0/multiple code files" && make
@@ -62,115 +62,64 @@
   game.h = Game类（含全部状态机+update/draw)    main.cpp = main()
   ```
 
-## 完整类结构
+## 完整文件结构（v1.2.21 多文件架构）
 
-### 数据结构 (struct)
-
-```
-Star                    — 背景星点 (x,y,phase,twinkleSpeed,driftSpeed)
-FloatingText            — 浮动文字 (x,y,text,alpha,life,ox,oy)
-BossConfig              — Boss 配置 (name, hp, triggerScore)
-ChapterConfig           — 章节配置 (isSideScrolling, bgSpeed, bossConfig, waveParams)
-FontChar                — 5x7 位图字形 (rows[7])
-ActiveSound             — 活跃音效追踪 (freq,targetFreq,phase,volume,...)
-MenuItem                — 菜单状态机条目
-
-Ch1Particle             — 粒子 (x,y,vx,vy,color[3],life,maxLife)
-BulletBase              — 子弹基类 (x,y,dx,dy,active,startX,startY,sideScroll,blueBeam,...)
-Ch1Bullet : BulletBase  — Ch1 子弹 (+canDamage,beamTargetIndex)
-EnemyData               — 敌人基类 (active,entering,defeated,hp,maxHp,enterFrame,...)
-Ch1Alien : EnemyData    — Ch1 透视外星飞船
-Ch2DanmakuEnemy : EnemyData — Ch2 弹幕敌人
-Ch2Alien : EnemyData    — Ch2 普通敌人
-Ch1Shockwave            — 冲击波 (y,id,active)
-Ch1HealWave             — 治疗波 (radius,id,active)
-Ch2EnemyBullet          — Ch2 敌人子弹
-
-MenuKeys                — 边沿检测辅助 (up/down/left/right/enter/esc now+was)
-```
-
-### 共享基础设施
+### 编译入口
 
 ```
-Font                    — 5x7 位图字体渲染 (drawChar/drawString, 浮点缩放)
-Renderer                — SDL 渲染器封装 (setColor/clear/present)
-AudioEngine             — 实时音频合成 (正弦/噪音/方波 + 包络/EQ/音量)
-FloatingTextManager     — 浮动文字管理 (spawn/update/draw)
-AimAssist               — 瞄准辅助组件 (snapProgress, update, draw)
-HUDBase                 — HUD 静态绘制 (drawScore/drawHPHearts/drawEnergyBar)
+main.cpp            (36 lines)  #include 所有头文件 + main()
 ```
 
-### 对话/旁白系统
+### 根目录: 共享基础 (17 files)
 
-```
-DialogueHistory         — 对话历史存储 (滚动/焦点, size/add/moveUp/moveDown/resetView)
-DialogueSystem          — 游戏内对话 (队列+状态机+渲染+打字机效果), 组合 DialogueHistory
-NarrationSystem         — 中心开幕旁白 (打字机+多行渲染)
-```
+| 文件 | 行数 | 内容 |
+|------|------|------|
+| `types.h` | 143 | 全部 18 个 struct + 2 个 enum |
+| `constants.h` | 19 | WIN_WIDTH/WIN_HEIGHT/CENTER_X/HORIZON_Y + perspLeft/Right/Width |
+| `font.h` | 153 | Font — 5x7 位图字体渲染 |
+| `renderer.h` | 37 | Renderer — SDL 渲染器封装 |
+| `audio.h` | 342 | AudioEngine — 实时音频合成 + BGM + 全部 snd* 函数 |
+| `floating_text.h` | 38 | FloatingTextManager |
+| `dialogue.h` | 235 | DialogueHistory + DialogueSystem + drawTextLine |
+| `narration.h` | 135 | NarrationSystem — 中心开幕旁白 |
+| `particles.h` | 140 | ParticleManager — 粒子特效管理 |
+| `aim_assist.h` | 41 | AimAssist — 瞄准辅助组件 |
+| `player.h` | 280 | Player + TrainingPlane + Ch2Trainer + NightElf[DORMANT] + Druid[DORMANT] |
+| `bullets.h` | 186 | BulletManager — addBullet/addBulletSideScrollAt/update/draw |
+| `chapter_manager.h` | 70 | ChapterManager — 章节配置/解锁/切换 |
+| `ui.h` | 185 | UIRenderer + MenuStateMachine + MenuKeys |
+| `game.h` | 2144 | Game 类 — 全部状态机 + 全部 update/draw 方法 |
 
-### Player 继承体系
+### ch1/ 子目录: Chapter 1 战斗系统 (4 files)
 
-```
-Player                  — 基类 (x,y,rollAngle,invFrames, AimAssist 组件)
-├── TrainingPlane       — Ch1 透视角度的训练机 (三角机身+机翼+尾翼, handleInput 含透视速度缩放)
-├── Ch2Trainer          — Ch2 横版训练机 (与 Ch1 同飞机侧视角度, 单发, 无翻滚动画) [当前活跃]
-├── NightElf             — Ch2 暗夜精灵 (30°锐角机头+燕尾+扫描线填充, 1发) [已搁置]
-└── Druid                — Ch3 备用设计 (双尾翼 boomerang 造型) [未激活]
-```
+| 文件 | 行数 | 内容 |
+|------|------|------|
+| `ch1_shockwave.h` | 191 | Ch1ShockwaveManager + ID 碰撞机制 |
+| `ch1_aliens.h` | 231 | Ch1AlienManager — 透视外星飞船管理 |
+| `ch1_boss.h` | 422 | Ch1Boss — TELAMONDO（二阶段+治疗波+吸收） |
+| `ch1_background.h` | 122 | Ch1Background — 星空+地平线+基地 |
 
-### Ch1 游戏系统
+### ch2/ 子目录: Chapter 2 战斗系统 (8 files)
 
-```
-ParticleManager         — 粒子管理器 (spawnExplosion/spawnDigitShatter...)
-BulletManager           — 子弹管理器 (addBullet/addBulletSideScrollAt/update...)
-Ch1ShockwaveManager     — 冲击波管理器
-Ch1AlienManager         — Ch1 外星飞船管理器
-Ch1Boss                 — Ch1 Boss (Telamondo, HP 条+二阶段)
-Ch1Background           — Ch1 星空+地平线+基地背景
-```
+| 文件 | 行数 | 内容 |
+|------|------|------|
+| `ch2_background.h` | 293 | Ch2Background — 侧滚廊桥背景 |
+| `ch2_shooter_base.h` | 149 | Ch2ShooterBase + NightElfEnergy[DORMANT] |
+| `ch2_hud.h` | 39 | HUDBase — drawScore/drawHPHearts/drawEnergyBar |
+| `ch2_danmaku.h` | 217 | Ch2DanmakuManager — 螺旋弹幕敌人 |
+| `ch2_aliens.h` | 154 | Ch2AlienManager — 普敌管理（菱形造型，四边突袭） |
+| `ch2_sphere_boss.h` | 383 | Ch2SphereBoss — 六角密铺菱形球体，7 状态机 |
+| `ch2_skill_orb.h` | 201 | Ch2SkillOrb — 漂浮技能球 + 18边形护罩 + 吸收 |
+| `ch2_pulse.h` | 197 | Ch2PulseSystem — 绿色能量条 + Shift 单按释放冲击波 |
 
-### Ch2 游戏系统
+### 休眠资产 (grep `[DORMANT]` 查找)
 
-```
-Ch2Background           — Ch2 侧滚廊桥背景 (玻璃面板+柱子+地板+星点)
-Ch2ShooterBase          — Ch2 射击基类 (bullets, playerHP/go 引用共享, updateBullets/drawBullets)
-├── Ch2DanmakuManager   — 弹幕敌人管理器 (螺旋弹幕图案)
-└── Ch2AlienManager     — Ch2 普敌管理器 (菱形造型, 四边突袭入场, 水晶子弹)
-Ch2SphereBoss           — 球体 Boss (六角密铺菱形, 7 状态机, 碎片物理)
-NightElfEnergy          — 白色能量条+三炮系统 (50命中蓄满/15秒/倒计时音效) [NightElf专属,当前未激活]
-```
-
-### 游戏框架
-
-```
-ChapterManager          — 章节选择/解锁/配置管理
-UIRenderer              — UI 绘制 (drawMenuCursor/drawMenuUnderline/drawSlider)
-MenuStateMachine        — 通用菜单状态机
-Game                    — 主游戏类 (持有所有系统, updateGameplay/drawGameplayFrame)
-```
-
-### Game 类关键成员
-
-```
-// Player (按章节切换指针)
-TrainingPlane trainingPlane; Ch2Trainer ch2Trainer; NightElf nightElf; Player* player;
-
-// Ch1 系统
-BulletManager bulletMgr; Ch1AlienManager alienMgr; ParticleManager particleMgr;
-Ch1ShockwaveManager shockwaveMgr; Ch1Boss boss; Ch1Background* background;
-
-// Ch2 系统
-Ch2Background* sideBg; Ch2DanmakuManager dmMgr; Ch2AlienManager ch2AlienMgr;
-Ch2SphereBoss sphereBoss; bool sphereBossActive;
-NightElfEnergy nightElfEnergy; int playerHitCount; int tripleBeepCounter;
-
-// 对话
-NarrationSystem narration; DialogueSystem dialogueSys; bool inNarration;
-
-// 状态
-int ch2PlayerHP; bool ch2GameOver; int dmFireCooldown;
-GamePhase phase; int score; bool paused;
-```
+| 资产 | 文件 | 激活条件 |
+|------|------|------|
+| NightElf | player.h | 门禁序列完成后 player 指针切换 |
+| NightElfEnergy | ch2/shooter_base.h | NightElf 激活后联动 |
+| Druid | player.h | Chapter 3 开发时激活 |
+| setStartBgm() | audio.h | 开始画面专属 BGM 设计完成后 |
 
 ### 关键设计决策
 
@@ -179,8 +128,8 @@ GamePhase phase; int score; bool paused;
 - **Ch2 射击**：`addBulletSideScrollAt(Player&)` 支持任意枪位，dx=11 恒定速度
 - **Ch1 射击**：`addBullet(TrainingPlane&)` 依赖 `getT()` 做透视弹道
 - **Ch1 子弹横飞 Bug 根因**：`sideScroll` 未初始化，垃圾值随机触发 Ch2 弹道 — 修复在 `addBullet()` 中显式设 `sideScroll=false`
-- **NightElf 搁置**：Ch2 当前使用 Ch2Trainer，NightElf 类和 NightElfEnergy 系统保留待后续激活
-- **球体 Boss 测试入口**：TEST → Chapter 2 直接触发入场动画
+- **碰撞 ID 机制**：Ch1Shockwave 用 `lastHitBySW == sw.id`，Ch2Pulse 用 `lastHitByPulse == w.id`，每波唯一，每敌人只受一次伤害
+- **只移动不改逻辑**：重构全部是剪切粘贴，零行逻辑修改
 
 ## OOP 重构后检查清单
 

@@ -756,3 +756,33 @@ Ver 1.0.1 | 2026-05-08
     - BUGFIX: 能量满后按Shift无反应 — release()残留charge守卫条件导致脉冲从不释放
     - BUGFIX: 吸收时能量条不增长 — getFill()的unlocked门控在吸收期间锁0%
     - BUGFIX: 吸收时能量条不增长重新修复 — getFill()彻底移除unlocked门控
+
+  Ver 1.2.21 | 代码架构重构：单文件→28个多文件模块化
+    - 全量代码重构：从6633行单文件拆分为28个头文件+1个main.cpp的结构化项目
+    - 文件结构映射：
+      - types.h — 全部18个struct（Star/FloatingText/BossConfig/ChapterConfig/FontChar/ActiveSound/
+        MenuItem/Ch1Particle/BulletBase/Ch1Bullet/EnemyData/Ch1Alien/Ch1Shockwave/Ch1HealWave/
+        Ch2EnemyBullet/Ch2PulseWave/Ch2DanmakuEnemy/Ch2Alien/ShieldDebris）
+      - constants.h — WIN_WIDTH/WIN_HEIGHT/CENTER_X/HORIZON_Y/perspLeft/perspRight/perspWidth
+      - font.h / renderer.h / audio.h — Font+Renderer+AudioEngine（共享基础设施）
+      - floating_text.h — FloatingTextManager
+      - dialogue.h — DialogueHistory + DialogueSystem + drawTextLine
+      - narration.h — NarrationSystem
+      - particles.h — ParticleManager（spawnExplosion/spawnWhiteParticle/spawnGreenParticle等）
+      - aim_assist.h — AimAssist组件
+      - player.h — Player基类 + TrainingPlane/Ch2Trainer/NightElf[DORMANT]/Druid[DORMANT]
+      - bullets.h — BulletManager（addBullet/addBulletSideScrollAt/update/draw）
+      - chapter_manager.h — ChapterManager（章节配置/解锁/切换）
+      - ui.h — UIRenderer + MenuStateMachine + MenuKeys
+      - game.h — Game类（2144行，含全部状态机+全部方法）
+      - main.cpp — #include所有头文件 + main()
+      - ch1/ — Ch1ShockwaveManager / Ch1AlienManager / Ch1Boss / Ch1Background（4个文件）
+      - ch2/ — Ch2Background / Ch2ShooterBase / Ch2DanmakuManager / Ch2AlienManager /
+        Ch2SphereBoss / Ch2PulseSystem+Ch2PulseWave / Ch2SkillOrb / HUDBase（8个文件）
+    - 全部实现内联在头文件中（#pragma once，单翻译单元编译）
+    - 新编译命令：cd "v2.0.0/multiple code files" && make
+    - 休眠资产[DORMANT]标注规范：NightElf（门禁序列激活后）/
+      NightElfEnergy（NightElf联动）/Druid（Chapter 3）/
+      setStartBgm() — 均为完整保留的未激活代码
+    - 旧单文件存档为 v2.0.0/space_shooting ver1.2.20 single-file archive.cpp
+    - 零行逻辑修改，纯剪切粘贴重构

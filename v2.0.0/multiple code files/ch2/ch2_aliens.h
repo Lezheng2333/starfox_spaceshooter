@@ -1,0 +1,154 @@
+#pragma once
+
+#include "../audio.h"
+#include "../bullets.h"
+#include "../floating_text.h"
+#include "../particles.h"
+#include "../player.h"
+#include "../renderer.h"
+#include "../types.h"
+#include "../ch2/ch2_shooter_base.h"
+
+// ============== Ch2AlienManager (Chapter 2 regular alien) ==============
+struct Ch2Alien : EnemyData {
+    double x, y, startX, startY, targetX, targetY;
+    int fireVolleyTimer, fireBurstCount, fireBurstTimer;
+    int lastHitByPulse;  // pulse wave ID already applied
+};
+
+class Ch2AlienManager : public Ch2ShooterBase {
+    static const int ALIEN_HP = 10;
+    static const int VOLNEY_COOLDOWN = 180;
+    static const int BURST_INTERVAL = 8;
+    static const int BURST_COUNT = 5;
+
+    std::vector<Ch2Alien> aliens;
+
+    void fireBullet(Player& pl, Ch2Alien& a) {
+        double dx = pl.getX() - a.x, dy = pl.getY() - a.y;
+        double d = std::sqrt(dx*dx + dy*dy); if (d < 1) d = 1;
+        Ch2EnemyBullet b;
+        b.x = a.x; b.y = a.y;
+        b.dx = dx / d * 1.5; b.dy = dy / d * 1.5;
+        b.hp = 3; b.active = true;
+        bullets.push_back(b);
+    }
+
+    void spawnOne() {
+        Ch2Alien a;
+        a.targetX = 640 + rand() % 141;
+        a.targetY = 40 + rand() % 521;
+        int side = rand() % 4;
+        if (side == 0)      { a.startX = 810; a.startY = 40 + rand() % 521; }        // right edge (off-screen)
+        else if (side == 1) { a.startX = -10; a.startY = 40 + rand() % 521; }        // left edge (off-screen)
+        else if (side == 2) { a.startX = 40 + rand() % 721; a.startY = -10; }         // top edge (full width)
+        else                { a.startX = 40 + rand() % 721; a.startY = 610; }         // bottom edge (full width)
+        a.x = a.startX; a.y = a.startY;
+        a.hp = ALIEN_HP; a.active = true; a.entering = true; a.defeated = false;
+        a.enterFrame = 0; a.enterDuration = 20 + rand() % 26;
+        a.invincibleFrames = 0;
+        a.fireVolleyTimer = 0; a.fireBurstCount = 0; a.fireBurstTimer = 0;
+        a.lastHitByPulse = -1;
+        aliens.push_back(a);
+    }
+
+public:
+    Ch2AlienManager(int& hp, bool& go) : Ch2ShooterBase(hp, go) {}
+    void reset() { aliens.clear(); resetBase(); }
+    void forceSpawn() { spawnOne(); }
+    int countLiving() const {
+        int cnt = 0;
+        for (const auto& a : aliens) { if (!a.defeated && a.active) cnt++; }
+        return cnt;
+    }
+    const std::vector<Ch2Alien>& getAliens() const { return aliens; }
+
+    void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
+                int& score, Player& pl, FloatingTextManager& ftMgr, int& hitCount) {
+        for (auto& a : aliens) {
+            if (!a.active && !a.defeated) continue;
+            if (a.defeated) continue;
+            if (a.entering) {
+                a.enterFrame++;
+                double raw = (double)a.enterFrame / a.enterDuration;
+                double eased = 1.0 - std::pow(1.0 - raw, 3.0);
+                if (raw >= 1.0) { raw = 1.0; eased = 1.0; a.entering = false; a.invincibleFrames = 3; a.fireVolleyTimer = 0; }
+                a.x = a.startX + (a.targetX - a.startX) * eased;
+                a.y = a.startY + (a.targetY - a.startY) * eased;
+                continue;
+            }
+            if (a.invincibleFrames > 0) {
+                a.invincibleFrames--;
+                if (a.invincibleFrames <= 0) a.fireVolleyTimer = 0;
+            } else {
+                a.x -= 0.35;
+                if (a.x < -40) { a.active = false; a.defeated = true; continue; }
+                if (a.fireBurstCount > 0) {
+                    a.fireBurstTimer--;
+                    if (a.fireBurstTimer <= 0) {
+                        a.fireBurstTimer = BURST_INTERVAL;
+                        fireBullet(pl, a); audio.sndShoot();
+                        a.fireBurstCount--;
+                        if (a.fireBurstCount <= 0) a.fireVolleyTimer = VOLNEY_COOLDOWN;
+                    }
+                } else {
+                    a.fireVolleyTimer--;
+                    if (a.fireVolleyTimer <= 0) { a.fireBurstCount = BURST_COUNT; a.fireBurstTimer = 0; }
+                }
+            }
+            // Player bullets vs alien collision
+            if (!a.entering && a.invincibleFrames <= 0) {
+                for (auto& b : bulletMgr.all()) {
+                    if (!b.active || !b.canDamage) continue;
+                    double dx = b.x - a.x, dy = b.y - a.y;
+                    if (dx*dx + dy*dy < 22.0*22.0) {
+                        b.active = false; b.canDamage = false; a.hp--; hitCount++;
+                        particleMgr.spawnExplosion(b.x, b.y, 3); audio.sndHit();
+                        if (a.hp <= 0) {
+                            a.defeated = true; a.active = false;
+                            particleMgr.spawnExplosion(a.x, a.y, 20);
+                            particleMgr.spawnExplosion(a.x-8, a.y-4, 12);
+                            particleMgr.spawnExplosion(a.x+8, a.y+4, 12);
+                            audio.sndExplosionSmall(); score += 1;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        // Remove defeated/inactive aliens
+        aliens.erase(std::remove_if(aliens.begin(), aliens.end(),
+            [](const Ch2Alien& a){ return !a.active && !a.defeated; }), aliens.end());
+        Ch2ShooterBase::updateBullets(bulletMgr, particleMgr, audio, pl, ftMgr, &hitCount);
+    }
+
+    void drawEnemy(SDL_Renderer* r) const {
+        for (const auto& a : aliens) {
+            if (!a.active) continue;
+            int ex = (int)a.x, ey = (int)a.y, sz = 12;
+            int rCol, gCol, bCol;
+            if (a.entering || a.invincibleFrames > 0) { rCol=100; gCol=180; bCol=255; }
+            else computeHPColor((double)a.hp / ALIEN_HP, rCol, gCol, bCol);
+            if (a.entering && a.enterFrame > 3) {
+                for (int k = 1; k <= 3; ++k) {
+                    double pRaw = (double)(a.enterFrame - k*3) / a.enterDuration;
+                    if (pRaw < 0) continue;
+                    double pE = 1.0 - std::pow(1.0 - pRaw, 3.0);
+                    int px = (int)(a.startX + (a.targetX - a.startX) * pE);
+                    int py = (int)(a.startY + (a.targetY - a.startY) * pE);
+                    SDL_SetRenderDrawColor(r, 100, 180, 255, (Uint8)(150 - k*40));
+                    SDL_RenderDrawPoint(r, px, py);
+                }
+            }
+            SDL_SetRenderDrawColor(r, (Uint8)rCol, (Uint8)gCol, (Uint8)bCol, 255);
+            int hw = sz * 2 / 3;
+            SDL_Point pts[4] = {
+                {ex, ey - sz}, {ex + hw, ey},
+                {ex, ey + sz}, {ex - hw, ey}
+            };
+            SDL_RenderDrawLines(r, pts, 4);
+            SDL_RenderDrawLine(r, pts[3].x, pts[3].y, pts[0].x, pts[0].y);
+            SDL_RenderDrawLine(r, ex - hw, ey, ex + hw, ey);
+        }
+    }
+};

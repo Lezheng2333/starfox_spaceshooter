@@ -44,10 +44,12 @@ int main(int argc, char** argv) {
     // 开发用开关（不影响正常游玩）：
     //   --test      主菜单显示隐藏的 TEST 入口（[DORMANT] 测试模式）
     //   --selftest  存档/读档自检后退出（无窗口，返回 0=PASS）
-    bool devMode = false, selfTest = false;
+    //   --mknodes   生成/刷新节点存档到 saves/（等价于旧 TEST 模式的跳关）
+    bool devMode = false, selfTest = false, mkNodes = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--test") == 0) devMode = true;
         else if (strcmp(argv[i], "--selftest") == 0) selfTest = true;
+        else if (strcmp(argv[i], "--mknodes") == 0) mkNodes = true;
     }
     // 自检把存档目录重定向到临时目录，避免覆盖玩家真实存档
     if (selfTest) setenv("SFSS_SAVE_DIR", "/tmp/sfss_selftest", 1);
@@ -61,7 +63,7 @@ int main(int argc, char** argv) {
                                           SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED,
                                           WIN_WIDTH, WIN_HEIGHT,
-                                          selfTest ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN);
+                                          (selfTest || mkNodes) ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN);
     if (!window) { SDL_Quit(); return 1; }
 
     Renderer renderer(window);
@@ -70,6 +72,7 @@ int main(int argc, char** argv) {
 
     int rc = 0;
     if (selfTest) rc = game.runSelfTest();
+    else if (mkNodes) rc = game.generateNodeSaves(SaveSystem::baseDir());
     else game.run();
 
     SDL_DestroyWindow(window);

@@ -872,12 +872,683 @@ public:
         printf("[selftest] ui list-back-to-menu=%s\n", backToMenu ? "ok" : "FAIL");
         if (!backToMenu) failures++;
 
-        // 10) 导出各界面截图，便于人工核对排版（无头渲染，不影响游戏）
+        // 10) 旧 TEST 模式的对话历史预填充（抽成公共函数后仍可用）
+        chapterMgr.selectChapter(0);
+        resetGame();
+        prepopulateCh1History(180);
+        // 注：PH(scr) 的判定是 score > scr（与游戏内的触发条件一致），180 分不会触发 PH(180)
+        bool histOk = (dialogueSys.history.size() > 0) && triggeredScores[160] &&
+                      triggeredScores[0] && !triggeredScores[195];
+        printf("[selftest] ui ch1-history-prefill=%s entries=%d\n",
+               histOk ? "ok" : "FAIL", dialogueSys.history.size());
+        if (!histOk) failures++;
+
+        // 11) 端到端：用文件浏览器选中一个节点存档并读档（玩家读节点存档的实际路径）
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        score = 66; ch2PlayerHP = 3;
+        std::string nodePath = SaveSystem::baseDir() + "/n99_uitest.sav";
+        std::string nerr;
+        bool nodeWrote = saveToPath(nodePath, nerr);
+        score = 5;                               // 改脏，读档后应回到 66
+        resetGame();
+        atStartScreen = true;
+        step(none, 2);
+        openLoadScreen(false);
+        step(none, 2);
+        saveMenu.cursor = SaveSystem::SLOT_COUNT;         // BROWSE FILE...
+        step(enter, 2); step(none, 1);
+        int rowIdx = -1;
+        for (int i = 0; i < (int)saveMenu.browser.rows.size(); ++i)
+            if (saveMenu.browser.rows[i].label == "n99_uitest.sav") rowIdx = i;
+        bool rowFound = (rowIdx >= 0);
+        if (rowFound) {
+            saveMenu.browser.cursor = rowIdx;
+            saveMenu.browser.clampScroll();
+        }
+        step(enter, 2); step(none, 1);            // 选中文件 → 确认框
+        bool fileConfirm = saveMenu.confirmActive;
+        step(enter, 2); step(none, 1);            // ENTER = 读档
+        bool fileLoaded = (!atSaveLoadScreen && paused && score == 66);
+        printf("[selftest] ui browse-load-node: wrote=%s row=%s confirm=%s loaded=%s score=%d\n",
+               nodeWrote ? "ok" : "FAIL", rowFound ? "ok" : "FAIL",
+               fileConfirm ? "ok" : "FAIL", fileLoaded ? "ok" : "FAIL", score);
+        if (!nodeWrote || !rowFound || !fileConfirm || !fileLoaded) failures++;
+        remove(nodePath.c_str());
+
+        // 12) 导出各界面截图，便于人工核对排版（无头渲染，不影响游戏）
         dumpScreens("/tmp/sfss_shots");
 
         resetGame();
         return failures;
     }
+
+
+    // ======== 节点存档生成器（--mknodes）========
+    // 目的：替代过时的 TEST 模式。每个节点先把游戏摆到该处状态（必要时空跑若干帧让其
+    // 自然推进），再调用与手动存档完全相同的 saveToPath() 落盘 —— 生成的文件在
+    // LOAD GAME → BROWSE FILE 里读取即可，等价于原来的跳关，但状态是完整合法的。
+    // 维护方式：游戏加了新内容，只要往 nodeTable() 加一条 + 在 buildNodeState() 加一个
+    // case，重跑 ./shooter --mknodes 就能刷新全部节点存档。
+    struct NodeDef {
+        const char* file;
+        const char* title;
+        const char* desc;
+    };
+
+    // UTF-8 显示宽度（中文/全角按 2 列算）——`%-26s` 按字节填充会让中文列错位
+    static int dispWidth(const char* s) {
+        int w = 0;
+        for (const unsigned char* p = (const unsigned char*)s; *p; ++p) {
+            if ((*p & 0xC0) == 0x80) continue;    // UTF-8 续字节
+            w += (*p < 0x80) ? 1 : 2;
+        }
+        return w;
+    }
+    static std::string padTo(const std::string& s, int width) {
+        int w = dispWidth(s.c_str());
+        if (w >= width) return s;
+        return s + std::string((size_t)(width - w), ' ');
+    }
+
+    static const int NODE_COUNT = 34;
+    static const NodeDef* nodeTable() {
+        static const NodeDef t[NODE_COUNT] = {
+            // ---- 第一章：透视空战 ----
+            {"n01_ch1_start.sav",        "第一章 · 开场",            "分数 0，开场对话中；对话结束敌人出现"},
+            {"n02_ch1_score30.sav",      "第一章 · 分数 30",         "冲击波 Lv1（基地炮解锁）"},
+            {"n03_ch1_score60.sav",      "第一章 · 分数 60",         "冲击波 Lv2"},
+            {"n04_ch1_score90.sav",      "第一章 · 分数 90",         "冲击波 Lv3"},
+            {"n05_ch1_score120.sav",     "第一章 · 分数 120",        "冲击波 Lv4 + 首都舰预警对话"},
+            {"n06_ch1_score150.sav",     "第一章 · 分数 150",        "冲击波 Lv5"},
+            {"n07_ch1_score180.sav",     "第一章 · 分数 180",        "冲击波 Lv6 满级 + 拦截警告"},
+            {"n08_ch1_boss_intro.sav",   "第一章 · Boss 登场",       "分数 200：TELAMONDO 登场动画"},
+            {"n09_ch1_boss_fight.sav",   "第一章 · Boss 一阶段",     "满血战斗 + 治疗波 + 小怪"},
+            {"n10_ch1_boss_absorb.sav",  "第一章 · Boss 吸收阶段",   "二阶段：吸收小怪回血（蓝色吸收光束）"},
+            {"n11_ch1_boss_phase2.sav",  "第一章 · Boss 二阶段",     "半血狂暴，纯战斗"},
+            {"n12_ch1_boss_1hp.sav",     "第一章 · Boss 剩 1 血",    "快速验证击破演出"},
+            {"n13_ch1_boss_defeat.sav",  "第一章 · Boss 击破",       "链式爆炸演出 → MISSION COMPLETE"},
+            // ---- 第二章：侧滚廊桥 ----
+            {"n14_ch2_start.sav",        "第二章 · 开场",            "门禁前，与 Bryssa 的开场对话中"},
+            {"n15_ch2_gate_pulsing.sav", "第二章 · 门禁脉冲",        "Ally 脉冲解锁中，绿色能量条消耗"},
+            {"n16_ch2_gate_scan.sav",    "第二章 · 门禁扫描",        "红色扫描光束锁定 + Moonwell AI 对话"},
+            {"n17_ch2_gate_open.sav",    "第二章 · 门禁开启",        "大门已开，可向右飞入"},
+            {"n18_ch2_corridor.sav",     "第二章 · 廊桥飞行",        "球体出现前的安静飞行段"},
+            {"n19_ch2_sphere_enter.sav", "第二章 · 球体入场",        "球体 Boss 随滚动靠近中"},
+            {"n20_ch2_sphere_fight.sav", "第二章 · 球体战斗",        "激活完成，橙色格子可输出"},
+            {"n21_ch2_sphere_shatter.sav","第二章 · 球体碎裂",       "格子炸开 + 碎片物理演出"},
+            {"n22_ch2_chase_wave1.sav",  "第二章 · 追逐战 第1波",    "自动出敌系统：3 只普敌"},
+            {"n23_ch2_chase_wave3.sav",  "第二章 · 追逐战 第3波",    "5 只 + 逃跑补位增援，最激烈的一段"},
+            {"n24_ch2_danmaku.sav",      "第二章 · 弹幕敌人",        "螺旋弹幕敌人出场"},
+            {"n25_ch2_orb_shield.sav",   "第二章 · 技能球护罩",      "18 边形护罩阶段（打 18 下破罩）"},
+            {"n26_ch2_orb_absorb.sav",   "第二章 · 技能球吸收",      "按住 Shift 吸收核心充能中"},
+            {"n27_ch2_pulse_full.sav",   "第二章 · 脉冲满能量",      "绿色能量满，Shift 可放冲击波"},
+            {"n28_ch2_nightelf_triple.sav","第二章 · 暗夜精灵三连发","白色能量满 → 三炮齐射模式"},
+            {"n29_ch2_lab.sav",          "第二章 · 中央研究室",      "圆形研究室，暗夜精灵号停在基座"},
+            {"n30_ch2_lab_upgrade.sav",  "第二章 · 研究室升级",      "升级动画中（白色粒子汇聚）"},
+            {"n31_ch2_boss_intro.sav",   "第二章 · Warden 登场",     "章节 Boss MOONWELL WARDEN 降下"},
+            {"n32_ch2_boss_fight.sav",   "第二章 · Warden 战斗",     "满血弹幕循环（放射/瞄准/螺旋）"},
+            {"n33_ch2_boss_enraged.sav", "第二章 · Warden 狂暴",     "半血以下 ENRAGED，弹幕更密"},
+            {"n34_ch2_boss_dying.sav",   "第二章 · Warden 击破",     "链式爆炸演出 → 结局旁白"}
+        };
+        return t;
+    }
+
+    // 第一章节点：按分数预填充"分数触发"的对话历史（旧 TEST 模式做法，测试菜单与节点生成器共用）
+    void prepopulateCh1History(int score) {
+        if (chapterMgr.getConfig().chapterNumber != 1 || score <= 0) return;
+        #define PH(scr, spk, ...) \
+            if (score > scr) { \
+                triggeredScores[scr] = true; \
+                dialogueSys.history.add(spk, __VA_ARGS__); \
+            }
+        PH(0, "Ally (ai copilot)", {"Martha, you're the only one in the air.", "Hold on as long as you can. The base shockwave cannon is charging."}, 2);
+        PH(3, "Ally (ai copilot)", {"These enemies are made of energy.", "Destroy them. We can collect the energy."}, 2);
+        PH(15, "", {"Tower communication restored."}, 1);
+        PH(20, "Tower (ai)", {"Shockwave cannon ready."}, 1);
+        if (score > 20) dialogueSys.history.add("Bryssa from Tower", {"A little more energy!"}, 1);
+        PH(30, "Tower (ai)", {"Defense system charged.", "More enemies incoming. Keep gathering energy."}, 2);
+        PH(40, "Ally (ai copilot)", {"Stay strong, Martha!"}, 1);
+        if (score > 40) {
+            dialogueSys.history.add("Bryssa from Tower", {"The trainer shares energy with the base.", "You and the base will upgrade together."}, 2);
+        }
+        PH(50, "Tower (ai)", {"Keep gathering energy."}, 1);
+        PH(55, "Ally (ai copilot)", {"System checking.", "Done."}, 2);
+        PH(61, "Tower (ai)", {"Base upgraded again."}, 1);
+        if (score > 61) dialogueSys.history.add("Bryssa from Tower", {"Radar shows even more enemies! Watch out!"}, 1);
+        PH(70, "Ally (ai copilot)", {"System checking result:", "Aiming assist system on this plane.", "You shall find it somewhere."}, 3);
+        PH(80, "Ally (ai copilot)", {"I've lost contact with the tower!", "But you and the base can upgrade again soon."}, 2);
+        PH(105, "", {"Tower communication restored."}, 1);
+        if (score > 105) {
+            dialogueSys.history.add("Tower (ai)", {"Massive energy signature detected.", "Analyzing source..."}, 2);
+        }
+        PH(120, "Bryssa from Tower", {"It's a capital ship.", "Telamondo-class. Martha, this is what the defense system was built for."}, 2);
+        PH(160, "Tower (ai)", {"Enemy capital ship approaching.", "Entering weapons range in 40 seconds."}, 2);
+        PH(180, "Bryssa from Tower", {"Shockwave Defense System is fully charged", "Martha, just keep them off us!"}, 2);
+        PH(195, "Ally (ai copilot)", {"Here it comes...!"}, 1);
+        #undef PH
+    }
+
+    // ---- 节点构建小工具 ----
+    // 单帧推进：必须与主循环同序（背景先更新再 updateGameplay），否则侧滚背景不会滚动，
+    // 球体 Boss 会永远卡在 ENTERING（背景停住 = 世界坐标不推进）。
+    void nodeStep(const Uint8* keys) {
+        if (background) background->update();
+        if (sideBg) sideBg->update();
+        updateGameplay(keys);
+    }
+    void nodeRun(const std::vector<Uint8>& keys, int frames) {
+        for (int i = 0; i < frames; ++i) nodeStep(keys.data());
+    }
+    template <class Pred>
+    bool nodeRunUntil(const std::vector<Uint8>& keys, int maxFrames, Pred done) {
+        for (int i = 0; i < maxFrames; ++i) {
+            nodeStep(keys.data());
+            if (done()) return true;
+        }
+        return false;
+    }
+    void nodeResetCh1(int score) {
+        chapterMgr.selectChapter(0);
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        bulletMgr.updateParams(score / 30);
+        shockwaveMgr.updateParams(score / 30);
+        this->score = score;
+        phase = PHASE_PLAY;
+        if (score == 0) lastScore = -1;                     // 让分数 0 的开场对话照常触发
+        else { lastScore = score; enemiesEnabled = true; shockwaveMgr.setPending(true); }
+        prepopulateCh1History(score);
+    }
+    void nodeResetCh2() {
+        chapterMgr.selectChapter(1);
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        bulletMgr.updateParams(1);
+        shockwaveMgr.updateParams(1);
+        player = &ch2Trainer;
+        ch2Trainer.reset();
+    }
+    // 旧 TEST 模式的手工外星飞船布场（入场动画/无敌标记与正常出怪一致）
+    void nodeSpawnCh1Aliens(int n) {
+        for (int i = 0; i < n; ++i) {
+            Ch1Alien a;
+            a.targetT = 0.15 + (rand() % 700) / 1000.0;
+            a.t = a.targetT; a.y = 120.0 + (rand() % 180);
+            a.entering = false; a.enterFromTop = false; a.enterFromBoss = false;
+            a.invincibleFrames = -1; a.lastHitBySW = -1; a.lastHealHit = -1;
+            a.absorbFrame = 0; a.absorbDuration = 0;
+            a.absorbStartX = 0; a.absorbStartY = 0; a.beingAbsorbed = false;
+            a.alienType = 0;
+            a.hp = 3 + rand() % 3; a.maxHp = a.hp;
+            a.active = true;
+            alienMgr.pushAlien(a);
+        }
+    }
+    void nodeHealCh2() { ch2PlayerHP = 3; ch2GameOver = false; gameOver = false; }
+
+    // ---- 摆出第 i 个节点的状态 ----
+    void buildNodeState(int i) {
+        std::vector<Uint8> k(SDL_NUM_SCANCODES, 0);       // 空按键（玩家静止）
+        std::vector<Uint8> fire(SDL_NUM_SCANCODES, 0);    // 按住射击
+        fire[SDL_SCANCODE_SPACE] = 1;
+        std::vector<Uint8> shift(SDL_NUM_SCANCODES, 0);   // 按住 Shift（技能球吸收）
+        shift[SDL_SCANCODE_LSHIFT] = 1;
+
+        switch (i) {
+            // ---------- 第一章 ----------
+            case 0:   // 开场（分数 0，开场对话中）
+                nodeResetCh1(0);
+                nodeRun(k, 70);
+                break;
+            case 1: case 2: case 3: case 4: case 5: case 6: {   // 分数 30/60/90/120/150/180
+                static const int sc[6] = {30, 60, 90, 120, 150, 180};
+                nodeResetCh1(sc[i - 1]);
+                nodeRun(fire, 120);       // 打一会儿：画面里有子弹/敌机/冲击波
+                break;
+            }
+            case 7:   // Boss 登场动画
+                nodeResetCh1(200);
+                boss.trigger();
+                phase = PHASE_BOSS_INTRO;
+                alienMgr.setAllInvincible();
+                nodeSpawnCh1Aliens(5);
+                nodeRun(k, 55);           // 停在下降途中
+                break;
+            case 8:   // Boss 一阶段（满血 + 治疗波）
+                nodeResetCh1(200);
+                boss.setY(90); boss.hpRef() = 1000; boss.setMaxHp(1000); boss.bonusHpRef() = 0;
+                boss.setActive(true); boss.enteringRef() = false;
+                boss.phase2TriggeredRef() = false; boss.flashTimerRef() = 0;
+                phase = PHASE_BOSS_FIGHT;
+                boss.setCh1HealWavesEnabled(true);
+                shockwaveMgr.setPending(true);
+                nodeSpawnCh1Aliens(3);
+                nodeRun(fire, 150);
+                break;
+            case 9:   // 二阶段 · 吸收小怪回血（旧 "BOSS PH.2" 的原型，带怪）
+                nodeResetCh1(200);
+                boss.setY(90); boss.hpRef() = 520; boss.setMaxHp(1000); boss.bonusHpRef() = 0;
+                boss.setActive(true); boss.enteringRef() = false;
+                boss.phase2TriggeredRef() = true; boss.flashTimerRef() = 0;
+                phase = PHASE_BOSS_PHASE2;
+                boss.setCh1HealWavesEnabled(false);
+                nodeSpawnCh1Aliens(5);
+                nodeRun(k, 110);          // 吸收状态机跑起来（蓝色吸收光束）
+                break;
+            case 10:  // 二阶段 · 吸收结束后的半血持续战斗
+                // 注：正常流程里 PHASE_BOSS_PHASE2 是"吸收小怪"阶段，吸收结束会回到
+                // PHASE_BOSS_FIGHT（phase2Triggered 保持 true）——这里就是那个状态
+                nodeResetCh1(200);
+                boss.setY(90); boss.hpRef() = 500; boss.setMaxHp(1000); boss.bonusHpRef() = 0;
+                boss.setActive(true); boss.enteringRef() = false;
+                boss.phase2TriggeredRef() = true; boss.flashTimerRef() = 0;
+                phase = PHASE_BOSS_FIGHT;
+                boss.setCh1HealWavesEnabled(true);
+                shockwaveMgr.setPending(true);
+                nodeSpawnCh1Aliens(2);
+                nodeRun(fire, 90);
+                break;
+            case 11:  // Boss 剩 1 HP（验证击破流程）
+                nodeResetCh1(200);
+                boss.setY(90); boss.hpRef() = 1; boss.setMaxHp(1000); boss.bonusHpRef() = 0;
+                boss.setActive(true); boss.enteringRef() = false;
+                boss.phase2TriggeredRef() = true; boss.flashTimerRef() = 0;
+                phase = PHASE_BOSS_FIGHT;
+                boss.setCh1HealWavesEnabled(true);
+                shockwaveMgr.setPending(true);
+                nodeRun(k, 40);
+                break;
+            case 12:  // 击破演出
+                nodeResetCh1(200);
+                boss.setY(90); boss.hpRef() = 0; boss.bonusHpRef() = 0;
+                boss.setActive(true); boss.enteringRef() = false;
+                phase = PHASE_BOSS_DEFEAT;
+                bossDefeatTimer = 0;
+                nodeSpawnCh1Aliens(3);
+                nodeRun(k, 70);           // 链式爆炸中
+                break;
+
+            // ---------- 第二章 ----------
+            case 13:  // 开场：门禁前对话
+                nodeResetCh2();
+                nodeRun(k, 40);
+                break;
+            case 14:  // 门禁 · Ally 脉冲解锁
+                nodeResetCh2();
+                dialogueSys.reset();
+                dGateQueued = true;
+                nodeRunUntil(k, 900, [this]{ return gateScene.getStage() == Ch2GateScene::PULSING
+                                                  && !gateScene.groups.empty(); });
+                nodeRun(k, 10);
+                break;
+            case 15:  // 门禁 · 扫描锁定（Moonwell AI 对话）
+                nodeResetCh2();
+                dialogueSys.reset();
+                dGateQueued = true;
+                nodeRunUntil(k, 1600, [this]{ return gateScene.getStage() == Ch2GateScene::SCANNING; });
+                nodeRun(k, 40);
+                break;
+            case 16:  // 门禁 · 大门开启
+                nodeResetCh2();
+                dialogueSys.reset();
+                dGateQueued = true; dMoonwellQueued = true;
+                gateScene.skipToOpen();
+                player->setX(520); player->setY(WIN_HEIGHT / 2);
+                nodeRun(k, 45);
+                break;
+            case 17:  // 廊桥飞行（球体出现前）
+                nodeResetCh2();
+                dialogueSys.reset();
+                dGateQueued = true; dMoonwellQueued = true;
+                gateScene.skipToOpen();
+                player->setX(660); player->setY(WIN_HEIGHT / 2);   // 飞过 x=640 → 白淡入转场
+                nodeRunUntil(k, 600, [this]{ return ch2Flow == C2_CORRIDOR; });
+                dialogueSys.reset();
+                nodeRun(k, 80);
+                break;
+            case 18:  // 球体 Boss · 滚动入场
+                nodeCh2PreSphere(k);
+                nodeRunUntil(fire, 900, [this]{ return sphereBossActive
+                                                  && sphereBoss.getState() == Ch2SphereBoss::ENTERING; });
+                nodeRun(k, 70);
+                break;
+            case 19:  // 球体 Boss · 激活完成可输出
+                nodeCh2PreSphere(k);
+                nodeCh2SphereToFight(k);
+                nodeRun(fire, 80);
+                break;
+            case 20:  // 球体 Boss · 碎裂崩塌
+                nodeCh2PreSphere(k);
+                nodeCh2SphereToFight(k);
+                for (int n = 0; n < 40 && sphereBoss.getState() == Ch2SphereBoss::FIGHT; ++n) {
+                    sphereBoss.takeDamage(30);
+                    nodeRun(k, 6);
+                }
+                nodeRunUntil(k, 600, [this]{ return sphereBoss.getState() == Ch2SphereBoss::SHATTERING; });
+                nodeRun(k, 60);
+                break;
+            case 21:  // 追逐战 · 第 1 波
+                nodeCh2ChaseBase(score);
+                autoSpawnPhase = 1; autoSpawnQueued = 3; autoSpawnTimer = 0;
+                autoSpawnScoreBase = score; autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
+                nodeRun(fire, 110);
+                break;
+            case 22:  // 追逐战 · 第 3 波 + 增援
+                nodeCh2ChaseBase(score);
+                autoSpawnPhase = 5; autoSpawnQueued = 5; autoSpawnTimer = 0;
+                autoSpawnScoreBase = score; autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
+                nodeRun(fire, 240);
+                break;
+            case 23:  // 弹幕敌人（螺旋弹幕）
+                nodeCh2ChaseBase(score);
+                dmMgr.spawnEnemy();
+                nodeRun(fire, 120);
+                break;
+            case 24:  // 技能球 · 护罩阶段
+                nodeCh2ChaseBase(score);
+                skillOrb.spawn(540.0, 220.0);
+                pulseOrbDropped = true;
+                nodeRun(fire, 70);
+                break;
+            case 25:  // 技能球 · 吸收充能中
+                nodeCh2ChaseBase(score);
+                skillOrb.spawn(540.0, 220.0);
+                pulseOrbDropped = true;
+                for (int n = 0; n < 18; ++n) skillOrb.registerHit(particleMgr, audio);   // 直接打掉护罩
+                pulseSystem.energy = 0;            // 吸收前提：绿条必须是空的
+                pulseSystem.draining = false;
+                player->setX((int)skillOrb.x - 70); player->setY((int)skillOrb.y);
+                nodeRun(shift, 70);
+                nodeHealCh2();
+                break;
+            case 26:  // 脉冲能量满
+                nodeCh2ChaseBase(score);
+                pulseSystem.unlocked = true;
+                pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY;
+                ch2AlienMgr.forceSpawn(); ch2AlienMgr.forceSpawn(); ch2AlienMgr.forceSpawn();
+                dmMgr.spawnEnemy();
+                nodeRun(k, 55);
+                nodeHealCh2();
+                break;
+            case 27:  // 暗夜精灵号 · 白色能量满（三连发）
+                nodeCh2ChaseBase(score);
+                player = &nightElf;
+                nightElf.reset();
+                nightElf.setX(140); nightElf.setY(300);
+                pulseSystem.unlocked = true;
+                pulseSystem.energy = 12;
+                nightElfEnergy.reset();
+                nightElfEnergy.setEnergy(NightElfEnergy::MAX_ENERGY);
+                nightElfEnergy.checkTripleTrigger();
+                ch2AlienMgr.forceSpawn(); ch2AlienMgr.forceSpawn(); ch2AlienMgr.forceSpawn();
+                nodeRun(fire, 70);
+                nodeHealCh2();
+                break;
+            case 28:  // 中央研究室（抵达）
+                nodeCh2LabBase();
+                nodeRun(k, 45);
+                break;
+            case 29:  // 研究室 · 升级动画中
+                nodeCh2LabBase();
+                player->setX(Ch2LabScene::PARK_X); player->setY(Ch2LabScene::PARK_Y);
+                nodeRunUntil(k, 300, [this]{ return labUpgradeState == 1; });
+                nodeRun(k, 25);
+                break;
+            case 30:  // Warden 登场
+                nodeCh2BossBase(false);
+                nodeRun(k, 55);
+                break;
+            case 31:  // Warden 战斗
+                nodeCh2BossBase(false);
+                nodeCh2WardenToFight(k);
+                nodeRun(fire, 110);
+                nodeHealCh2();
+                break;
+            case 32:  // Warden 狂暴
+                nodeCh2BossBase(false);
+                nodeCh2WardenToFight(k);
+                wardenBoss.hp = Ch2WardenBoss::ENRAGE_HP + 5;
+                wardenBoss.takeDamage(10);                     // → ENRAGED
+                nodeRun(fire, 90);
+                nodeHealCh2();
+                break;
+            case 33:  // Warden 击破演出
+                nodeCh2BossBase(false);
+                nodeCh2WardenToFight(k);
+                wardenBoss.hp = 5;
+                wardenBoss.takeDamage(10);                     // → DYING（未到结局旁白）
+                nodeRun(k, 40);
+                nodeHealCh2();
+                break;
+        }
+    }
+
+    // 第二章公共底座：门禁前 → 廊桥 → 球体出现（供球体/追逐/技能球节点复用）
+    void nodeCh2PreSphere(const std::vector<Uint8>& keys) {
+        nodeResetCh2();
+        dialogueSys.reset();
+        dGateQueued = true; dMoonwellQueued = true;
+        gateScene.skipToOpen();
+        player->setX(660); player->setY(WIN_HEIGHT / 2);   // 飞过 x=640 → 白淡入转场
+        nodeRunUntil(keys, 600, [this]{ return ch2Flow == C2_CORRIDOR; });
+        dialogueSys.reset();
+        dChaseQueued = true;
+    }
+    void nodeCh2SphereToFight(const std::vector<Uint8>& keys) {
+        nodeRunUntil(keys, 2400, [this]{ return sphereBossActive
+                                            && sphereBoss.getState() == Ch2SphereBoss::FIGHT; });
+    }
+    // 第二章追逐战底座：跳过门禁与球体，直接进入追逐段
+    void nodeCh2ChaseBase(int sc) {
+        nodeResetCh2();
+        dialogueSys.reset();
+        dGateQueued = true; dMoonwellQueued = true; dSphereIntroQueued = true;
+        dSphereActQueued = true; dChaseQueued = true;
+        gateScene.skipToOpen();
+        sphereBossActive = false;
+        sphereBoss.reset();
+        ch2Flow = C2_CHASE;
+        autoSpawnPhase = 0; autoSpawnQueued = 0; autoSpawnTimer = 0;
+        score = sc;
+        player = &nightElf;
+        nightElf.reset();
+        nightElf.setX(140); nightElf.setY(300);
+        pulseSystem.unlocked = true;
+        pulseSystem.energy = 8;
+        autoSpawnScoreBase = score; autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
+    }
+    void nodeCh2LabBase() {
+        nodeResetCh2();
+        dialogueSys.reset();
+        dGateQueued = true; dMoonwellQueued = true; dSphereIntroQueued = true;
+        dSphereActQueued = true; dChaseQueued = true; dLabQueued = false;
+        gateScene.skipToOpen();
+        sphereBossActive = false;
+        sphereBoss.reset();
+        ch2Flow = C2_LAB;
+        ch2LabInitDone = false;
+        autoSpawnPhase = 0;
+        score = 25;
+        player = &ch2Trainer;
+        ch2Trainer.reset();
+        player->setX(300); player->setY(Ch2LabScene::PARK_Y);
+        pulseSystem.unlocked = true;
+        pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY;
+    }
+    void nodeCh2BossBase(bool keepDialogue) {
+        nodeResetCh2();
+        if (!keepDialogue) dialogueSys.reset();
+        dGateQueued = true; dMoonwellQueued = true; dSphereIntroQueued = true;
+        dSphereActQueued = true; dChaseQueued = true; dLabQueued = true;
+        dUpgradeQueued = true; dBossWarnQueued = true;
+        gateScene.skipToOpen();
+        sphereBossActive = false;
+        sphereBoss.reset();
+        ch2Flow = C2_BOSS;
+        score = 25;
+        player = &nightElf;
+        nightElf.reset();
+        nightElf.setX(150); nightElf.setY(300);
+        pulseSystem.unlocked = true;
+        pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY;
+        autoSpawnPhase = 6;                 // 右侧能量墙重新开启
+        wardenBoss.startEntering();
+    }
+    void nodeCh2WardenToFight(const std::vector<Uint8>& keys) {
+        nodeRunUntil(keys, 1200, [this]{ return wardenBoss.getState() == Ch2WardenBoss::FIGHT; });
+    }
+
+    // ---- 节点状态自校验：确认 buildNodeState() 真的把游戏摆到了该节点 ----
+    // 返回 nullptr 表示通过，否则返回失败原因（写进日志，避免"生成成功但节点内容不对"）
+    const char* nodeVerify(int i, char* buf, size_t n) {
+        switch (i) {
+            case 0:  return (score == 0 && dialogueSys.isActive()) ? nullptr : "expect ch1 opening dialogue";
+            case 1:  return (score == 30)  ? nullptr : "expect score 30";
+            case 2:  return (score == 60)  ? nullptr : "expect score 60";
+            case 3:  return (score == 90)  ? nullptr : "expect score 90";
+            case 4:  return (score == 120) ? nullptr : "expect score 120";
+            case 5:  return (score == 150) ? nullptr : "expect score 150";
+            case 6:  return (score == 180) ? nullptr : "expect score 180";
+            case 7:  if (phase == PHASE_BOSS_INTRO) return nullptr;
+                     snprintf(buf, n, "expect INTRO (phase=%d)", (int)phase); return buf;
+            case 8:  if (phase == PHASE_BOSS_FIGHT) return nullptr;
+                     snprintf(buf, n, "expect FIGHT (phase=%d hp=%d)", (int)phase, boss.getHp()); return buf;
+            case 9:  if (phase == PHASE_BOSS_PHASE2) return nullptr;
+                     snprintf(buf, n, "expect PHASE2 absorb (phase=%d hp=%d)", (int)phase, boss.getHp()); return buf;
+            case 10: if (phase == PHASE_BOSS_FIGHT && boss.isPhase2Triggered()) return nullptr;
+                     snprintf(buf, n, "expect phase2 fight (phase=%d p2=%d hp=%d)", (int)phase,
+                              boss.isPhase2Triggered() ? 1 : 0, boss.getHp()); return buf;
+            case 11: if (phase == PHASE_BOSS_FIGHT && boss.getHp() <= 1) return nullptr;
+                     snprintf(buf, n, "expect boss hp1 (phase=%d hp=%d)", (int)phase, boss.getHp()); return buf;
+            case 12: if (phase == PHASE_BOSS_DEFEAT) return nullptr;
+                     snprintf(buf, n, "expect DEFEAT (phase=%d)", (int)phase); return buf;
+            case 13: return (ch2Flow == C2_GATE && dialogueSys.isActive()) ? nullptr : "expect gate dialogue";
+            case 14: if (gateScene.getStage() == Ch2GateScene::PULSING) return nullptr;
+                     snprintf(buf, n, "expect PULSING (stage=%d groups=%d)", (int)gateScene.getStage(), (int)gateScene.groups.size()); return buf;
+            case 15: if (gateScene.getStage() == Ch2GateScene::SCANNING) return nullptr;
+                     snprintf(buf, n, "expect SCANNING (stage=%d)", (int)gateScene.getStage()); return buf;
+            case 16: if (gateScene.isOpen()) return nullptr;
+                     snprintf(buf, n, "expect OPEN (stage=%d door=%.2f)", (int)gateScene.getStage(), gateScene.doorOpen); return buf;
+            case 17: if (ch2Flow == C2_CORRIDOR && !sphereBossActive) return nullptr;
+                     snprintf(buf, n, "expect CORRIDOR (flow=%d sphereActive=%d)", ch2Flow, sphereBossActive ? 1 : 0); return buf;
+            case 18: if (sphereBossActive && sphereBoss.getState() == Ch2SphereBoss::ENTERING) return nullptr;
+                     snprintf(buf, n, "expect sphere ENTERING (active=%d state=%d flow=%d)", sphereBossActive ? 1 : 0, (int)sphereBoss.getState(), ch2Flow); return buf;
+            case 19: if (sphereBoss.getState() == Ch2SphereBoss::FIGHT) return nullptr;
+                     snprintf(buf, n, "expect sphere FIGHT (state=%d flow=%d)", (int)sphereBoss.getState(), ch2Flow); return buf;
+            case 20: if (sphereBoss.getState() >= Ch2SphereBoss::SHATTERING &&
+                         sphereBoss.getState() <= Ch2SphereBoss::SHAKING) return nullptr;
+                     snprintf(buf, n, "expect sphere SHATTER (state=%d)", (int)sphereBoss.getState()); return buf;
+            case 21: if (ch2Flow == C2_CHASE && ch2AlienMgr.countLiving() > 0) return nullptr;
+                     snprintf(buf, n, "expect wave1 aliens (flow=%d alive=%d)", ch2Flow, ch2AlienMgr.countLiving()); return buf;
+            case 22: if (ch2Flow == C2_CHASE && ch2AlienMgr.countLiving() >= 3) return nullptr;
+                     snprintf(buf, n, "expect wave3 aliens (flow=%d alive=%d)", ch2Flow, ch2AlienMgr.countLiving()); return buf;
+            case 23: if (!dmMgr.getEnemies().empty()) return nullptr;
+                     snprintf(buf, n, "expect danmaku enemy (n=%d)", (int)dmMgr.getEnemies().size()); return buf;
+            case 24: if (skillOrb.state == Ch2SkillOrb::FLOATING) return nullptr;
+                     snprintf(buf, n, "expect orb FLOATING (state=%d shield=%d)", (int)skillOrb.state, skillOrb.shieldHp); return buf;
+            case 25: if (skillOrb.state == Ch2SkillOrb::ABSORBING && pulseSystem.energy > 0) return nullptr;
+                     snprintf(buf, n, "expect orb ABSORBING (state=%d timer=%d energy=%d)", (int)skillOrb.state, skillOrb.absorbTimer, pulseSystem.energy); return buf;
+            case 26: if (pulseSystem.isFull()) return nullptr;
+                     snprintf(buf, n, "expect pulse FULL (energy=%d unlocked=%d)", pulseSystem.energy, pulseSystem.unlocked ? 1 : 0); return buf;
+            case 27: if (player == (Player*)&nightElf && nightElfEnergy.isTripleActive()) return nullptr;
+                     snprintf(buf, n, "expect nightelf TRIPLE (nightelf=%d triple=%d)", player == (Player*)&nightElf ? 1 : 0, nightElfEnergy.isTripleActive() ? 1 : 0); return buf;
+            case 28: if (ch2Flow == C2_LAB && labUpgradeState == 0) return nullptr;
+                     snprintf(buf, n, "expect LAB arrival (flow=%d upgrade=%d)", ch2Flow, labUpgradeState); return buf;
+            case 29: if (ch2Flow == C2_LAB && labUpgradeState == 1) return nullptr;
+                     snprintf(buf, n, "expect LAB upgrade anim (flow=%d upgrade=%d t=%d)", ch2Flow, labUpgradeState, labUpgradeTimer); return buf;
+            case 30: if (wardenBoss.getState() == Ch2WardenBoss::ENTERING) return nullptr;
+                     snprintf(buf, n, "expect warden ENTERING (state=%d)", (int)wardenBoss.getState()); return buf;
+            case 31: if (wardenBoss.getState() == Ch2WardenBoss::FIGHT) return nullptr;
+                     snprintf(buf, n, "expect warden FIGHT (state=%d hp=%d)", (int)wardenBoss.getState(), wardenBoss.getHp()); return buf;
+            case 32: if (wardenBoss.getState() == Ch2WardenBoss::ENRAGED) return nullptr;
+                     snprintf(buf, n, "expect warden ENRAGED (state=%d hp=%d)", (int)wardenBoss.getState(), wardenBoss.getHp()); return buf;
+            case 33: if (wardenBoss.getState() == Ch2WardenBoss::DYING && !wardenBoss.isDefeated()) return nullptr;
+                     snprintf(buf, n, "expect warden DYING (state=%d defeated=%d)", (int)wardenBoss.getState(), wardenBoss.isDefeated() ? 1 : 0); return buf;
+        }
+        return "unknown node";
+    }
+
+    // ---- 生成全部节点存档 ----
+    int generateNodeSaves(const std::string& dir) {
+        SaveSystem::ensureDir(dir);
+        const NodeDef* table = nodeTable();
+        std::string readme;
+        readme += "STAR FOX SPACE SHOOTER — 节点存档说明\n";
+        readme += "=====================================\n\n";
+        readme += "这些存档由 ./shooter --mknodes 自动生成，等价于以前的 TEST 模式跳关，\n";
+        readme += "但状态是完整合法的（含飞行中的子弹/敌人/对话进度）。\n\n";
+        readme += "读取方式：主菜单 → LOAD GAME → BROWSE FILE... → 选 saves/ 里的对应文件 →\n";
+        readme += "确认读档 → 画面停在存档瞬间 → 选 RESUME → 3-2-1 倒计时后继续。\n\n";
+        readme += "游戏更新后想刷新全部节点：在源码目录执行 ./shooter --mknodes\n\n";
+        readme += "小技巧：把某个 nXX_*.sav 复制/改名为 slot1.sav ~ slot6.sav，它就会直接出现在\n";
+        readme += "        LOAD GAME 的槽位列表里（不用每次翻文件夹）。AUTO 槽请留给自动存档。\n\n";
+        readme += "注意：读档会覆盖当前进度，读之前游戏会二次确认。\n\n";
+        readme += "----------------------------------------------------------------\n";
+        int okCount = 0, failCount = 0;
+        for (int i = 0; i < NODE_COUNT; ++i) {
+            buildNodeState(i);
+            // 1) 状态自校验：确认摆到了目标节点
+            char vbuf[160] = {0};
+            const char* vfail = nodeVerify(i, vbuf, sizeof(vbuf));
+            // 2) 落盘
+            std::string path = dir + "/" + table[i].file;
+            std::string err;
+            bool ok = saveToPath(path, err);
+            // 3) 回读摘要：确认文件可读且章节/分数与预期一致
+            SaveMeta chk; std::string merr;
+            bool metaOk = ok && SaveSystem::readMeta(path, chk, merr);
+            if (ok && metaOk && !vfail) okCount++; else failCount++;
+            std::string flags = std::string(vfail ? "STATE-BAD " : "state-ok ") +
+                                (ok ? (metaOk ? "file-ok" : "META-BAD") : "WRITE-FAIL");
+            printf("[nodes] %2d/%-2d %s%s%s\n", i + 1, NODE_COUNT,
+                   padTo(table[i].file, 30).c_str(), padTo(table[i].title, 24).c_str(),
+                   (flags + (vfail ? ("  <- " + std::string(vfail)) : "")).c_str());
+            if (!ok && !err.empty()) printf("[nodes]        write error: %s\n", err.c_str());
+            readme += padTo(table[i].file, 30) + padTo(table[i].title, 24) + table[i].desc + "\n";
+        }
+        // ---- 回读验证：逐个真正读档 + 渲染一帧 + 复检状态（确保文件拿来就能用）----
+        int loadOk = 0, loadFail = 0;
+        printf("[nodes] reload check:\n");
+        for (int i = 0; i < NODE_COUNT; ++i) {
+            std::string path = dir + "/" + table[i].file;
+            std::string lerr;
+            bool loaded = loadFromPath(path, lerr);
+            char lbuf[160] = {0};
+            const char* lvfail = loaded ? nodeVerify(i, lbuf, sizeof(lbuf)) : "load failed";
+            std::vector<uint32_t> px;
+            bool rendered = loaded && renderToPixels(px);
+            // 画面非空校验：读档后那一帧必须真的有内容（防止"能读但黑屏"）
+            int ink = 0;
+            for (size_t k = 0; k < px.size(); ++k) if ((px[k] & 0x00FFFFFFu) != 0) ink++;
+            double inkPct = px.empty() ? 0.0 : 100.0 * ink / (double)px.size();
+            bool hasInk = (inkPct > 0.05);
+            if (!hasInk) lvfail = "frame is blank";
+            if (loaded && rendered && hasInk && !lvfail) loadOk++;
+            else {
+                loadFail++;
+                printf("[nodes]   RELOAD-BAD %-28s %s%s%s\n", table[i].file,
+                       loaded ? "" : ("load: " + lerr).c_str(),
+                       lvfail ? lvfail : "", rendered ? "" : " render failed");
+            }
+            printf("[nodes]   reload %2d %s ink=%.1f%%\n", i + 1, padTo(table[i].file, 30).c_str(), inkPct);
+        }
+        printf("[nodes] reload: %d ok, %d bad\n", loadOk, loadFail);
+        failCount += loadFail;
+
+        readme += "----------------------------------------------------------------\n";
+        char tail[256];
+        snprintf(tail, sizeof(tail), "\n生成结果：成功 %d 个，失败 %d 个（含回读验证）。\n", okCount, failCount);
+        readme += tail;
+        FILE* f = fopen((dir + "/NODES_README.txt").c_str(), "wb");
+        if (f) { fwrite(readme.c_str(), 1, readme.size(), f); fclose(f); }
+        printf("[nodes] %d ok, %d failed -> %s\n", okCount, failCount, dir.c_str());
+        printf("[nodes] 说明文件: %s/NODES_README.txt\n", dir.c_str());
+        return failCount == 0 ? 0 : 1;
+    }
+
 
 private:
     // ======== START SCREEN ========
@@ -1193,39 +1864,7 @@ private:
                 boss.setCh1HealWavesEnabled(true);
                 shockwaveMgr.setPending(true);
             }
-            // Pre-populate Ch1 dialogue history for test mode
-            if (chapterMgr.getConfig().chapterNumber == 1 && score > 0) {
-                #define PH(scr, spk, ...) \
-                    if (score > scr) { \
-                        triggeredScores[scr] = true; \
-                        dialogueSys.history.add(spk, __VA_ARGS__); \
-                    }
-                PH(0, "Ally (ai copilot)", {"Martha, you're the only one in the air.", "Hold on as long as you can. The base shockwave cannon is charging."}, 2);
-                PH(3, "Ally (ai copilot)", {"These enemies are made of energy.", "Destroy them. We can collect the energy."}, 2);
-                PH(15, "", {"Tower communication restored."}, 1);
-                PH(20, "Tower (ai)", {"Shockwave cannon ready."}, 1);
-                if (score > 20) dialogueSys.history.add("Bryssa from Tower", {"A little more energy!"}, 1);
-                PH(30, "Tower (ai)", {"Defense system charged.", "More enemies incoming. Keep gathering energy."}, 2);
-                PH(40, "Ally (ai copilot)", {"Stay strong, Martha!"}, 1);
-                if (score > 40) {
-                    dialogueSys.history.add("Bryssa from Tower", {"The trainer shares energy with the base.", "You and the base will upgrade together."}, 2);
-                }
-                PH(50, "Tower (ai)", {"Keep gathering energy."}, 1);
-                PH(55, "Ally (ai copilot)", {"System checking.", "Done."}, 2);
-                PH(61, "Tower (ai)", {"Base upgraded again."}, 1);
-                if (score > 61) dialogueSys.history.add("Bryssa from Tower", {"Radar shows even more enemies! Watch out!"}, 1);
-                PH(70, "Ally (ai copilot)", {"System checking result:", "Aiming assist system on this plane.", "You shall find it somewhere."}, 3);
-                PH(80, "Ally (ai copilot)", {"I've lost contact with the tower!", "But you and the base can upgrade again soon."}, 2);
-                PH(105, "", {"Tower communication restored."}, 1);
-                if (score > 105) {
-                    dialogueSys.history.add("Tower (ai)", {"Massive energy signature detected.", "Analyzing source..."}, 2);
-                }
-                PH(120, "Bryssa from Tower", {"It's a capital ship.", "Telamondo-class. Martha, this is what the defense system was built for."}, 2);
-                PH(160, "Tower (ai)", {"Enemy capital ship approaching.", "Entering weapons range in 40 seconds."}, 2);
-                PH(180, "Bryssa from Tower", {"Shockwave Defense System is fully charged", "Martha, just keep them off us!"}, 2);
-                PH(195, "Ally (ai copilot)", {"Here it comes...!"}, 1);
-                #undef PH
-            }
+            prepopulateCh1History(score);   // 按分数预填充对话历史（与节点生成器共用）
             lastScore = score;
         }
     }

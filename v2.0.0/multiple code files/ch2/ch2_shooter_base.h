@@ -142,6 +142,8 @@ public:
     bool justEnteredTriple() const { return tripleJustEntered; }
     int getTripleTimer() const { return tripleTimer; }
     float getFill() const { return (float)(energy / MAX_ENERGY); }
+    // 节点存档生成/调试用：直接把能量条设到指定值
+    void setEnergy(double e) { energy = e < 0.0 ? 0.0 : (e > MAX_ENERGY ? (double)MAX_ENERGY : e); }
 
     // 存档：白色能量条（能量值/命中窗口计时/三连发剩余时间）
     template <class Ar> void visit(Ar& ar) {

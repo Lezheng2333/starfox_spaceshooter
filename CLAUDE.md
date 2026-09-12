@@ -19,6 +19,7 @@
   ./shooter              # 正常游玩
   ./shooter --test       # 主菜单显示隐藏的 TEST 入口（跳关/预设状态调试）
   ./shooter --selftest   # 存档系统自检（无窗口，0=PASS；存档写 /tmp，不动玩家存档）
+  ./shooter --mknodes    # 生成/刷新 34 个节点存档到 saves/（替代旧 TEST 模式的跳关）
   ```
 - **SDL2 安装**：`brew install sdl2`
 - **GitHub 仓库**：`Lezheng2333/starfox_spaceshooter`
@@ -99,7 +100,7 @@
 ### 编译入口
 
 ```
-main.cpp            (78 lines)  #include 所有头文件 + main()（--test / --selftest 参数解析）
+main.cpp            (81 lines)  #include 所有头文件 + main()（--test / --selftest / --mknodes 参数解析）
 ```
 
 ### 根目录: 共享基础 (19 files)
@@ -122,7 +123,7 @@ main.cpp            (78 lines)  #include 所有头文件 + main()（--test / --s
 | `ui.h` | 185 | UIRenderer + MenuStateMachine + MenuKeys |
 | `save_system.h` | 533 | SaveArchive（读写双端序列化）+ SaveMeta + SaveSystem（路径/CRC/文件 IO）+ FileBrowser + GameSettings |
 | `save_menu.h` | 274 | SaveMenu — 读档列表/存档列表/迷你文件浏览器/确认框/提示条 |
-| `game.h` | 3513 | Game 类 — 全部状态机 + 全部 update/draw + 存档序列化 + 存/读档界面接线 |
+| `game.h` | 4246 | Game 类 — 全部状态机 + 全部 update/draw + 存档序列化 + 存/读档界面接线 |
 
 ### ch1/ 子目录: Chapter 1 战斗系统 (4 files)
 
@@ -138,7 +139,7 @@ main.cpp            (78 lines)  #include 所有头文件 + main()（--test / --s
 | 文件 | 行数 | 内容 |
 |------|------|------|
 | `ch2_background.h` | 312 | Ch2Background — 侧滚廊桥背景 |
-| `ch2_shooter_base.h` | 158 | Ch2ShooterBase + NightElfEnergy（白色能量条） |
+| `ch2_shooter_base.h` | 160 | Ch2ShooterBase + NightElfEnergy（白色能量条） |
 | `ch2_hud.h` | 86 | HUDBase — drawScore/drawHPHearts/drawEnergyBar/drawEnergyBarWhite/drawBossBar |
 | `ch2_danmaku.h` | 224 | Ch2DanmakuManager — 螺旋弹幕敌人 |
 | `ch2_aliens.h` | 168 | Ch2AlienManager — 普敌管理（菱形造型，四边突袭） |
@@ -194,6 +195,13 @@ main.cpp            (78 lines)  #include 所有头文件 + main()（--test / --s
   - 存档目录 ./saves/，不可写回退 ~/Library/Application Support/StarFoxSpaceShooter/saves/，
     环境变量 SFSS_SAVE_DIR 可强制指定（--selftest 用它写到 /tmp）
   - 布局规则：改动 serializeAll 字段顺序/类型必须 +1 SAVE_FORMAT_VERSION（只按格式版本拒绝旧档）
+- **节点存档生成器（--mknodes，Ver 1.2.23 补充）**：TEST 模式跳关功能的替代方案，
+  把 34 个测试节点直接生成为存档文件（saves/nXX_*.sav），读档即等于跳到该节点
+  - 三段式维护：nodeTable()（清单）+ buildNodeState()（怎么摆）+ nodeVerify()（怎么验）；
+    加节点 = 各加一条，然后重跑 ./shooter --mknodes 刷新全部存档
+  - 生成时必须过三道校验：状态自校验 / 文件回读 / 读档渲染非空（防"生成成功但节点不对"）
+  - 节点空跑必须走 nodeStep()（先 background/sideBg update 再 updateGameplay），
+    与主循环 stepFrame() 同序；只调 updateGameplay 会让侧滚背景不滚动（球体 Boss 卡 ENTERING）
 - **只移动不改逻辑**：重构全部是剪切粘贴，零行逻辑修改
 
 ## OOP 重构后检查清单
@@ -210,11 +218,14 @@ main.cpp            (78 lines)  #include 所有头文件 + main()（--test / --s
 
 `DEVELOPMENT_LOG.md` 遵循以下格式规则：
 
-1. **标题行**：`Ver X.X.X | 简短中文概括`（不超过一行）
-2. **条目**：全部使用 `- ` 开头，4 空格缩进。**每个条目之间必须用空行分隔**（确保 Markdown 预览模式下条目正确换行）。续行用 6+ 空格缩进紧跟父条目。
+1. **标题行**：`  Ver X.X.X | 简短中文概括`（**行首 2 空格缩进**，不超过一行）；
+   标题行下面**直接跟第一个条目**，不要空行、不要 `----` 分隔线
+   - 只有里程碑大版本（0.1.0 / 1.1.0 / 1.2.0 这类）才用 `Ver X | 日期` + `----` 分隔线做章节大标题
+2. **条目**：全部使用 `- ` 开头，4 空格缩进。**每个条目之间必须用空行分隔**（确保 Markdown 预览模式下条目正确换行）。续行用 6+ 空格缩进紧跟父条目；子条目用 6 空格 + `- `。
 3. **顺序**：新功能/优化/enhancement 在前，**BUGFIX 统一在最后**
 4. **BUGFIX 格式**：`- BUGFIX: 问题描述 + 修复方法`，与其他条目同级缩进
 5. 每个条目尽量控制在一行内，避免不必要的多行展开
+6. 版本号不变的小补充（如仅补语音资源、仅补开发工具）用 `  Ver X.X.X (补充) | ...` 标题，与上一版本共用版本号
 
 ## 发布流程 (/release 技能)
 

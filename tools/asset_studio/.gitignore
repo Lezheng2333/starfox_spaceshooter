@@ -1,0 +1,15 @@
+# 渲染缓存（可随时重建）
+cache/
+
+# 编译产物
+assetstudio
+
+# 草稿自动生成的入口文件（由 drafts/gen_drafts.py 生成）
+drafts/_generated.h
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

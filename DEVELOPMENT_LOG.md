@@ -1173,3 +1173,15 @@ Ver 1.0.1 | 2026-05-08
     - BUGFIX: 节点空跑只调用 updateGameplay()，而侧滚背景的推进在主循环 stepFrame() 里，
       导致背景不滚动、球体 Boss 永远卡在 ENTERING —— 节点推进改为与主循环同序
       （先更新背景再 updateGameplay）
+
+  Ver 1.2.23 (补充) | 开始开发配套工具 Asset Studio 素材工坊（独立目录 tools/asset_studio）
+    - 立项：把 TEST 模式退役后失去的"素材草稿箱"补回来 —— 存档系统管"从任意节点测玩法"，
+      工坊管"做素材"，两者互补；附属独立开发日志 tools/asset_studio/DEVELOPMENT_LOG.md
+
+    - 工具直接调用游戏真实绘制代码渲染（本作素材是 C++ 绘制代码而非图片文件），
+      并自定义 SDL_SetRenderDrawColor 覆盖动态库中的同名符号，实现零侵入换阵营配色
+
+    - 主游戏零改动：素材注册表放在工具侧、靠 include 游戏头文件工作，单向依赖，
+      游戏完全不知道工坊存在
+
+    - 入口 tools/asset_studio/studio.sh，画廊 http://127.0.0.1:8791/

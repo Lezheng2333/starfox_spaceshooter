@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Asset Studio — 素材工坊</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <span class="title">Asset Studio</span>
+    <span class="sub">素材工坊</span>
+  </div>
+  <div class="topbar-spacer"></div>
+  <div class="search-wrap">
+    <input id="search" type="search" placeholder="搜索素材名 / id / 标签…" autocomplete="off">
+  </div>
+  <label class="field">
+    <span>阵营配色</span>
+    <select id="palette">
+      <option value="none">原色（线框白）</option>
+      <option value="friendly">己方 · 白</option>
+      <option value="enemy">敌方 · 红</option>
+      <option value="skill">技能 · 绿</option>
+      <option value="neutral">中立 · 青</option>
+      <option value="gold">金色</option>
+      <option value="violet">紫色</option>
+      <option value="255,60,60,tint">敌方 · 红（亮度保留）</option>
+    </select>
+  </label>
+  <label class="field">
+    <span>背景</span>
+    <select id="bg">
+      <option value="0A0C18">深蓝黑</option>
+      <option value="000000">纯黑</option>
+      <option value="141821">浅灰蓝</option>
+      <option value="FFFFFF">白底</option>
+    </select>
+  </label>
+  <button id="btn-refresh" class="btn">重新扫描素材</button>
+  <button id="btn-scan" class="btn btn-warn" title="检查游戏源码里有没有未登记的绘制入口">未登记检查</button>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <section>
+      <h3>章节</h3>
+      <div id="f-chapter" class="facet"></div>
+    </section>
+    <section>
+      <h3>类型</h3>
+      <div id="f-category" class="facet"></div>
+    </section>
+    <section>
+      <h3>标签</h3>
+      <div id="f-tags" class="facet tags"></div>
+    </section>
+    <section id="drafts-section" hidden>
+      <h3>草稿箱</h3>
+      <div id="f-drafts" class="facet"></div>
+    </section>
+  </aside>
+
+  <main class="main">
+    <div id="status" class="status"></div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" hidden>没有符合条件的素材</div>
+  </main>
+</div>
+
+<!-- ============ 详情面板 ============ -->
+<div id="detail" class="detail" hidden>
+  <div class="detail-panel">
+    <button id="detail-close" class="detail-close" title="关闭">✕</button>
+
+    <div class="detail-left">
+      <div class="preview-box">
+        <img id="detail-img" alt="素材预览">
+      </div>
+      <div class="preview-tools">
+        <label class="chk"><input type="checkbox" id="t-anim" checked> 动画</label>
+        <label class="chk"><input type="checkbox" id="t-scene"> 真实场景</label>
+        <label class="chk"><input type="checkbox" id="t-grid"> 网格</label>
+        <label class="chk"><input type="checkbox" id="t-axes"> 坐标轴</label>
+        <label class="chk"><input type="checkbox" id="t-symmetry"> 对称轴</label>
+        <label class="chk"><input type="checkbox" id="t-bbox"> 包围盒</label>
+        <label class="field compact"><span>放大</span>
+          <select id="t-zoom">
+            <option value="1">1×</option><option value="2">2×</option>
+            <option value="3">3×</option><option value="4">4×</option>
+            <option value="6">6×</option><option value="8">8×</option>
+          </select>
+        </label>
+      </div>
+      <div id="detail-analysis" class="analysis"></div>
+    </div>
+
+    <div class="detail-right">
+      <h2 id="detail-name"></h2>
+      <div id="detail-id" class="mono dim"></div>
+      <p id="detail-desc" class="desc"></p>
+      <div id="detail-tags" class="tags-row"></div>
+
+      <div id="detail-states-wrap" class="block" hidden>
+        <h3>状态</h3>
+        <div id="detail-states" class="state-row"></div>
+      </div>
+
+      <div id="detail-params-wrap" class="block" hidden>
+        <h3>参数 <button id="btn-reset-params" class="btn btn-mini">恢复默认</button></h3>
+        <div id="detail-params"></div>
+      </div>
+
+      <div class="block">
+        <h3>操作</h3>
+        <div class="action-row">
+          <button id="btn-copy-code" class="btn">导出代码</button>
+          <button id="btn-download" class="btn">下载 PNG</button>
+          <button id="btn-source" class="btn">查看源码</button>
+          <button id="btn-clone" class="btn btn-accent" title="派生出可自由改造的参数化草稿">克隆为草稿</button>
+        </div>
+        <div id="action-msg" class="action-msg"></div>
+      </div>
+
+      <div id="source-wrap" class="block" hidden>
+        <h3>源码 <button id="btn-source-hide" class="btn btn-mini">收起</button></h3>
+        <pre id="detail-source" class="code"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 扫描报告 ============ -->
+<div id="scan-modal" class="detail" hidden>
+  <div class="detail-panel scan-panel">
+    <button id="scan-close" class="detail-close">✕</button>
+    <h2>未登记检查</h2>
+    <p class="desc">扫描游戏源码里所有绘制入口，和素材注册表比对。<br>
+       <b>源码里有、注册表里没有</b> = 这个素材在画廊里看不到，需要登记。</p>
+    <div id="scan-body" class="scan-body"></div>
+  </div>
+</div>
+
+<script src="/web/app.js"></script>
+</body>
+</html>

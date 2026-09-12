@@ -1,0 +1,14 @@
+{
+  "id": "draft.nightelf_wide",
+  "title": "暗夜精灵号 · 参数化变体",
+  "dir": "nightelf_wide",
+  "status": "draft",
+  "derivedFrom": "ch2.player.nightelf",
+  "createdAt": "2026-02-14",
+  "note": "示范草稿：把 NightElf 的硬编码尺寸全部参数化。fillBottom 开关可直接对比「主游戏只填上半机身」和「上下对称填充」。",
+  "tuned": {
+    "noseLen": 30,
+    "wingSpan": 8,
+    "fillBottom": 0
+  }
+}

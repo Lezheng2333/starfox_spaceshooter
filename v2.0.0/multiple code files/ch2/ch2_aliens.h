@@ -14,6 +14,13 @@ struct Ch2Alien : EnemyData {
     double x, y, startX, startY, targetX, targetY;
     int fireVolleyTimer, fireBurstCount, fireBurstTimer;
     int lastHitByPulse;  // pulse wave ID already applied
+    template <class Ar> void visit(Ar& ar) {
+        visitBase(ar);
+        ar.ioNum(x); ar.ioNum(y);
+        ar.ioNum(startX); ar.ioNum(startY); ar.ioNum(targetX); ar.ioNum(targetY);
+        ar.ioNum(fireVolleyTimer); ar.ioNum(fireBurstCount); ar.ioNum(fireBurstTimer);
+        ar.ioNum(lastHitByPulse);
+    }
 };
 
 class Ch2AlienManager : public Ch2ShooterBase {
@@ -55,6 +62,7 @@ class Ch2AlienManager : public Ch2ShooterBase {
 public:
     Ch2AlienManager(int& hp, bool& go) : Ch2ShooterBase(hp, go) {}
     void reset() { aliens.clear(); resetBase(); }
+    void clearAll() { aliens.clear(); bullets.clear(); }
     void forceSpawn() { spawnOne(); }
     int countLiving() const {
         int cnt = 0;
@@ -62,6 +70,12 @@ public:
         return cnt;
     }
     const std::vector<Ch2Alien>& getAliens() const { return aliens; }
+
+    // 存档：全部普敌 + 敌方子弹
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(aliens);
+        Ch2ShooterBase::visitBase(ar);
+    }
 
     void update(BulletManager& bulletMgr, ParticleManager& particleMgr, AudioEngine& audio,
                 int& score, Player& pl, FloatingTextManager& ftMgr, int& hitCount) {

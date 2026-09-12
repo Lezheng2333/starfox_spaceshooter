@@ -89,6 +89,9 @@ public:
         }
     }
 
+    // 存档：星空（位置/闪烁相位/漂移），保证读档后第一帧与存档帧一致
+    template <class Ar> void visit(Ar& ar) { ar.ioVecObj(stars); }
+
     void drawBase(SDL_Renderer* renderer) const {
         const int BASE_H = 75;
         const double A = WIN_WIDTH / 2.0 - 15.0;

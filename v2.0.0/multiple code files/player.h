@@ -28,6 +28,13 @@ public:
     void setRollTarget(double rt) { rollTarget = rt; }
     void setRollAngle(double ra) { rollAngle = ra; }
     void setInvFrames(int f) { invFrames = f; }
+    // 存档：基础状态（子类若新增状态，覆写 visit 并先调用 Player::visit）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioNum(x); ar.ioNum(y);
+        ar.ioNum(rollAngle); ar.ioNum(rollTarget);
+        ar.ioNum(lastMoveDir); ar.ioNum(invFrames);
+        ar.ioObj(aimAssist);
+    }
     void updateInvFrames() { if (invFrames > 0) invFrames--; }
     void resetState() {
         rollAngle = 0; rollTarget = 0; lastMoveDir = 0;
@@ -184,14 +191,25 @@ public:
     int getNoseOffset() const override { return 12; }
 };
 
-// ============== NightElf (plane 2) [DORMANT — 门禁序列激活] ==============
+// ============== NightElf (plane 2) [门禁序列后激活] ==============
 class NightElf : public Player {
+    bool tripleFire;   // linked to NightElfEnergy triple mode (3 guns while active)
+
 public:
-    NightElf() : Player() {}
+    NightElf() : Player(), tripleFire(false) {}
 
     void reset() {
         x = 100; y = WIN_HEIGHT / 2;
         resetState();
+    }
+
+    void setTripleFire(bool t) { tripleFire = t; }
+    bool isTripleFire() const { return tripleFire; }
+
+    // 存档：Player 基础状态 + 三连发标记（与白色能量条联动，必须存）
+    template <class Ar> void visit(Ar& ar) {
+        Player::visit(ar);
+        ar.ioBool(tripleFire);
     }
 
     void draw(SDL_Renderer* r) const override {
@@ -232,7 +250,7 @@ public:
         }
     }
 
-    int getGunCount() const override { return 1; } // single-fire for now
+    int getGunCount() const override { return tripleFire ? 3 : 1; }
     void getGunOffset(int idx, int& ox, int& oy) const override {
         if (idx == 0)      { ox = 32; oy = 0; }    // nose tip
         else if (idx == 1) { ox = 29; oy = -8; }   // upper wing tip

@@ -10,6 +10,9 @@
 struct ShieldDebris {
     double sx, sy, vx, vy;
     int life;
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioNum(sx); ar.ioNum(sy); ar.ioNum(vx); ar.ioNum(vy); ar.ioNum(life);
+    }
 };
 
 class Ch2SkillOrb {
@@ -25,6 +28,13 @@ public:
 
     Ch2SkillOrb() : x(0), y(0), vx(0), vy(0), radius(14.0), shieldHp(18), shieldBroken(false),
                     state(INACTIVE), absorbTimer(0) {}
+
+    // 存档：技能球位置/漂移速度/护罩血量/吸收进度 + 护罩碎片
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioNum(x); ar.ioNum(y); ar.ioNum(vx); ar.ioNum(vy); ar.ioNum(radius);
+        ar.ioNum(shieldHp); ar.ioBool(shieldBroken); ar.ioEnum(state); ar.ioNum(absorbTimer);
+        ar.ioVecObj(shieldDebris);
+    }
 
     void spawn(double sx, double sy) {
         x = sx; y = sy;

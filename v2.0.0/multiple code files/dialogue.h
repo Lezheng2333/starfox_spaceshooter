@@ -12,6 +12,11 @@ public:
         std::string speaker;
         std::vector<std::string> lines;
         int numLines;
+        template <class Ar> void visit(Ar& ar) {
+            ar.ioStr(speaker);
+            ar.ioVecStr(lines);
+            ar.ioNum(numLines);
+        }
     };
 
     void add(const std::string& speaker, const std::vector<std::string>& lines, int numLines) {
@@ -21,6 +26,12 @@ public:
     const Entry& operator[](int i) const { return entries[i]; }
     int size() const { return (int)entries.size(); }
     void clear() { entries.clear(); scroll = 0; focusSlot = 2; }
+
+    // 存档：历史记录 + 暂停菜单里的滚动/焦点位置
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(entries);
+        ar.ioNum(scroll); ar.ioNum(focusSlot);
+    }
 
     int scroll = 0;
     int focusSlot = 2;  // 0=top, 1=mid, 2=bottom
@@ -70,6 +81,14 @@ class DialogueSystem {
         int typeTimer;
         float y;
         float fadeStartY;
+        // 存档：对话进度（含打字机已显示字数/弹出动画计时/淡出位置）
+        template <class Ar> void visit(Ar& ar) {
+            ar.ioStr(text); ar.ioStr(speaker);
+            ar.ioBool(sameSpeaker); ar.ioBool(historyRecorded);
+            ar.ioVecStr(vlines); ar.ioNum(numLines);
+            ar.ioNum(state); ar.ioNum(timer); ar.ioNum(revealed); ar.ioNum(typeTimer);
+            ar.ioNum(y); ar.ioNum(fadeStartY);
+        }
     };
 
     static const int POPUP_FRAMES = 15;
@@ -93,6 +112,13 @@ class DialogueSystem {
 
 public:
     DialogueHistory history;
+
+    // 存档：当前队列 + 进度 + 边沿检测标记（enterWas 保持 true，读档后不会误跳过第一行）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(queue);
+        ar.ioNum(idx); ar.ioBool(active); ar.ioBool(enterWas); ar.ioNum(ticks);
+        ar.ioObj(history);
+    }
 
     void queueDialogue(const char* speaker, const char* text) {
         Line l;
@@ -128,10 +154,17 @@ public:
 
     bool isActive() const { return active; }
     int popTicks() { int n = ticks; ticks = 0; return n; }
+    // 读档后调用：把 ENTER 边沿状态置为"已按下"，避免读档瞬间跳过当前行
+    void suppressEnter() { enterWas = true; }
     const std::string& currentSpeaker() const {
         static std::string none;
         if (!active || idx >= (int)queue.size()) return none;
         return queue[idx].speaker;
+    }
+    const std::string& currentText() const {
+        static std::string none;
+        if (!active || idx >= (int)queue.size()) return none;
+        return queue[idx].text;
     }
 
     void reset() {

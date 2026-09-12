@@ -33,10 +33,18 @@ class MenuStateMachine;
 #include "types.h"
 #include "ch1/ch1_aliens.h"
 #include "ch2/ch2_hud.h"
+#include "save_menu.h"
+#include "save_system.h"
+#include <cstring>
+#include <map>
 
 // ============== Game 类 ==============
 
 enum GamePhase { PHASE_PLAY, PHASE_BOSS_INTRO, PHASE_BOSS_FIGHT, PHASE_BOSS_PHASE2, PHASE_BOSS_DEFEAT };
+
+// Chapter 2 scripted flow state machine (normal play):
+// GATE → CORRIDOR → SPHERE → CHASE → LAB → BOSS → ENDED
+enum Ch2Flow { C2_GATE, C2_CORRIDOR, C2_SPHERE, C2_CHASE, C2_LAB, C2_BOSS, C2_ENDED };
 
 class Game {
     Renderer& renderer;
@@ -123,11 +131,50 @@ class Game {
     bool shiftWas;        // Shift key edge detection
     bool shiftJustPressed; // true for one frame when Shift first pressed
 
+    // Ch2 scripted flow state machine
+    int ch2Flow;
+    int ch2PhaseTimer;    // generic per-flow timer
+    int ch2FadeTimer;     // white scene-transition fade (0=off, 1..29 active)
+    bool ch2GateInitDone;
+    bool ch2LabInitDone;
+    Ch2GateScene gateScene;
+    Ch2LabScene labScene;
+    Ch2WardenBoss wardenBoss;
+    int labUpgradeState;  // 0=approach, 1=upgrading animation, 2=done
+    int labUpgradeTimer;
+    bool ch2EpilogueStarted;
+    // Ch2 scripted dialogue one-shot flags
+    bool dGateQueued, dMoonwellQueued, dCorridorQueued, dSphereIntroQueued, dSphereActQueued;
+    bool dChaseQueued, dOrbQueued, dPulseQueued, dLabQueued, dUpgradeQueued;
+    bool dBossWarnQueued, dBossEnrageQueued;
+
+    // Voice-over (narration / dialogue dubbing)
+    int voiceLang;            // 0=中文 (default), 1=English, 2=OFF (letter pops only)
+    std::map<uint32_t, std::string> voicePaths[2];  // [0]=zh [1]=en: hash → rel path (voice_manifest.txt)
+    int lastNarrationPage;    // current narration page already voiced
+    uint32_t lastDialogueHash;// hash of the dialogue line already voiced
+    bool currentLineVoiced;   // current dialogue line has a real voice clip
+
     // Timing
     Uint32 lastTime;
 
+    // ==== 存档系统（Save / Load）====
+    SaveMenu saveMenu;
+    SaveMeta slotMeta[SaveSystem::SLOT_COUNT];
+    GameSettings settings;
+    bool atSaveLoadScreen;     // 存档/读档/文件浏览器界面
+    bool saveMenuFromPause;    // true=从暂停菜单进入（返回时回到暂停菜单）
+    bool pendingAutoSave;      // 章节开始 / Ch2 流程段落切换时写 AUTO 槽
+    uint32_t playFrames;       // 本局帧数（存档信息用）
+    bool bkspWas;              // 文件浏览器返回上级目录的边沿检测
+    bool devMode;              // --test：显示隐藏的 TEST 入口（[DORMANT — 仅开发构建]）
+    int pendingSaveAction;     // 确认框待执行动作：0=无 1=存槽位 2=读槽位 3=另存路径 4=读文件
+    int pendingSlot;
+    std::string pendingPath;
+
     // Edge detection helpers for menus
     bool upWas, downWas, enterWas, escWas, leftWas, rightWas;
+    bool pUpWas, pDownWas, pEnterWas, pLeftWas, pRightWas;   // 暂停菜单（改成员变量：读档后需要复位）
     int autoSpawnPhase;    // 0=idle,1=spawnW1(3),2=fightW1,3=spawnW2(5),4=fightW2,5=wave3,6=danmaku+done
     int autoSpawnQueued;   // aliens left to spawn in current spawning phase
     int autoSpawnTimer;    // countdown frames to next spawn (0.2s=12)
@@ -142,7 +189,7 @@ class Game {
     Ch2Background* sideBg;
 
 public:
-    Game(Renderer& r, AudioEngine& a, SDL_Window*)
+    Game(Renderer& r, AudioEngine& a, SDL_Window*, bool dev = false)
         : renderer(r), audio(a),
           player(&trainingPlane), shakeTex(nullptr),
           phase(PHASE_PLAY), score(0), baseHP(10), difficultyTimer(0),
@@ -161,8 +208,21 @@ public:
           ch2AlienMgr(ch2PlayerHP, ch2GameOver), dmMgr(ch2PlayerHP, ch2GameOver),
           dmFireCooldown(0), sphereBossActive(false), playerHitCount(0), tripleBeepCounter(0),
           pulseOrbDropped(false), shiftWas(true), shiftJustPressed(false),
-          lastTime(0), upWas(false), downWas(false), enterWas(false), escWas(false),
+          ch2Flow(C2_GATE), ch2PhaseTimer(0), ch2FadeTimer(0),
+          ch2GateInitDone(false), ch2LabInitDone(false),
+          labUpgradeState(0), labUpgradeTimer(0), ch2EpilogueStarted(false),
+          dGateQueued(false), dMoonwellQueued(false), dCorridorQueued(false),
+          dSphereIntroQueued(false), dSphereActQueued(false),
+          dChaseQueued(false), dOrbQueued(false), dPulseQueued(false),
+          dLabQueued(false), dUpgradeQueued(false),
+          dBossWarnQueued(false), dBossEnrageQueued(false),
+          voiceLang(0), lastNarrationPage(-1), lastDialogueHash(0), currentLineVoiced(false),
+          lastTime(0),
+          atSaveLoadScreen(false), saveMenuFromPause(false), pendingAutoSave(false),
+          playFrames(0), bkspWas(false), devMode(dev), pendingSaveAction(0), pendingSlot(0),
+          upWas(false), downWas(false), enterWas(false), escWas(false),
           leftWas(false), rightWas(false),
+          pUpWas(false), pDownWas(false), pEnterWas(false), pLeftWas(false), pRightWas(false),
           autoSpawnPhase(0), autoSpawnQueued(0), autoSpawnTimer(0),
           autoSpawnWave3Reinf(0), autoSpawnScoreBase(0),
           autoSpawnAliveLast(0), autoSpawnKillsLast(0),
@@ -171,6 +231,42 @@ public:
         boss.setConfig(&chapterMgr.getConfig().bossConfig);
         background = new Ch1Background(chapterMgr.getConfig());
         sideBg = new Ch2Background();
+        loadVoiceManifest();
+        loadSettings();
+        buildStartMenu();
+    }
+
+    // 启动时恢复 OPTIONS 设置（瞄准辅助 / 语音语言 / 音量与 EQ）
+    void loadSettings() {
+        settings.load();
+        aimAssistOn = (settings.aimAssist != 0);
+        voiceLang = settings.voiceLang;
+        audio.setSoundState(settings.bgm, settings.sfx, settings.eqLow, settings.eqMid, settings.eqHigh);
+    }
+
+    // 设置变更后写回磁盘
+    void storeSettings() {
+        settings.aimAssist = aimAssistOn ? 1 : 0;
+        settings.voiceLang = voiceLang;
+        settings.bgm = audio.getBgmVolume();
+        settings.sfx = audio.getSfxVolume();
+        settings.eqLow = audio.getEqLow();
+        settings.eqMid = audio.getEqMid();
+        settings.eqHigh = audio.getEqHigh();
+        settings.save();
+    }
+
+    // voice/voice_manifest.txt: "<lang> <crc32> <relpath>" per line
+    void loadVoiceManifest() {
+        FILE* f = fopen("voice/voice_manifest.txt", "rb");
+        if (!f) return;
+        char lang[16], hash[16], path[256];
+        while (fscanf(f, "%15s %15s %255s", lang, hash, path) == 3) {
+            uint32_t h = (uint32_t)strtoul(hash, nullptr, 16);
+            int li = (strcmp(lang, "zh") == 0) ? 0 : 1;
+            voicePaths[li][h] = path;
+        }
+        fclose(f);
     }
 
     ~Game() { delete background; delete sideBg; }
@@ -215,6 +311,16 @@ public:
         sphereBoss.reset(); sphereBossActive = false;
         nightElfEnergy.reset(); playerHitCount = 0; tripleBeepCounter = 0;
         pulseSystem.reset(); skillOrb.reset(); pulseOrbDropped = false; shiftWas = true;
+        ch2Flow = C2_GATE; ch2PhaseTimer = 0; ch2FadeTimer = 0;
+        ch2GateInitDone = false; ch2LabInitDone = false;
+        gateScene.reset(); labScene.reset(); wardenBoss.reset();
+        labUpgradeState = 0; labUpgradeTimer = 0; ch2EpilogueStarted = false;
+        dGateQueued = false; dMoonwellQueued = false; dCorridorQueued = false;
+        dSphereIntroQueued = false; dSphereActQueued = false;
+        dChaseQueued = false; dOrbQueued = false; dPulseQueued = false;
+        dLabQueued = false; dUpgradeQueued = false;
+        dBossWarnQueued = false; dBossEnrageQueued = false;
+        lastNarrationPage = -1; lastDialogueHash = 0; currentLineVoiced = false;
         autoSpawnPhase = 0; autoSpawnQueued = 0; autoSpawnTimer = 0;
         autoSpawnWave3Reinf = 0; autoSpawnScoreBase = 0;
         autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
@@ -222,6 +328,10 @@ public:
         defeatFWTimer = 0; defeatMCDelay = 0; defeatFadeTimer = 0;
         countdown = -1; countdownFrame = 0;
         soundCursor = 0;
+        playFrames = 0;
+        pendingAutoSave = false;
+        atSaveLoadScreen = false;
+        saveMenuFromPause = false;
         if (background) { delete background; background = new Ch1Background(chapterMgr.getConfig()); }
         if (sideBg) sideBg->reset();
     }
@@ -230,19 +340,33 @@ public:
         lastTime = SDL_GetTicks();
         bool running = true;
         SDL_Event e;
-
         while (running) {
             bool escPressed = false;
             while (SDL_PollEvent(&e)) {
                 if (e.type == SDL_QUIT) running = false;
                 if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) escPressed = true;
             }
+            stepFrame(SDL_GetKeyboardState(NULL), escPressed, running);
+            renderer.present();
 
-            const Uint8* keys = SDL_GetKeyboardState(NULL);
-            audio.setBossMusic(phase == PHASE_BOSS_FIGHT && boss.isActive());
-            audio.setBgmOff(atStartScreen || atChapterSelect || atTestSelect || atOptionScreen || atSoundMenu || paused || gameOver || missionComplete);
+            Uint32 now = SDL_GetTicks();
+            Uint32 elapsed = now - lastTime;
+            if (elapsed < 16) SDL_Delay(16 - elapsed);
+            lastTime = SDL_GetTicks();
+        }
+        storeSettings();   // 退出前保存 OPTIONS 设置
+    }
+
+    // 单帧逻辑（run() 的主循环体；抽出来便于 --selftest 用合成按键驱动真实流程）
+    void stepFrame(const Uint8* keys, bool escPressed, bool& running) {
+        // 块作用域只是为了保留原 run() 循环体的缩进，不改任何逻辑
+        {
+            bool wardenFight = chapterMgr.getConfig().isSideScrolling &&
+                (wardenBoss.getState() == Ch2WardenBoss::FIGHT || wardenBoss.getState() == Ch2WardenBoss::ENRAGED);
+            audio.setBossMusic((phase == PHASE_BOSS_FIGHT && boss.isActive()) || wardenFight);
+            audio.setBgmOff(atStartScreen || atChapterSelect || atTestSelect || atOptionScreen || atSoundMenu || atSaveLoadScreen || paused || gameOver || missionComplete);
             audio.setCh2Bgm(chapterMgr.getConfig().isSideScrolling &&
-                !atStartScreen && !atChapterSelect && !atTestSelect && !atOptionScreen && !atSoundMenu && !gameOver);
+                !atStartScreen && !atChapterSelect && !atTestSelect && !atOptionScreen && !atSoundMenu && !atSaveLoadScreen && !gameOver);
             if (background) background->update();
             if (sideBg) sideBg->update();
 
@@ -250,14 +374,23 @@ public:
             if (escPressed && inNarration) {
                 // ESC skips entire opening narration
                 narration.reset(); inNarration = false;
+                audio.stopVoice();
+            } else if (escPressed && chapterMgr.getConfig().isSideScrolling && ch2Flow == C2_GATE && !gameOver) {
+                // ESC skips the whole Ch2 gate sequence (jump straight to the open door)
+                dialogueSys.reset();
+                gateScene.skipToOpen();
+                dGateQueued = true; dMoonwellQueued = true;
             } else if (escPressed && !inNarration && !gameOver && !atStartScreen && !atTestSelect && !atChapterSelect
-                && !atOptionScreen && !atSoundMenu && !missionComplete) {
+                && !atOptionScreen && !atSoundMenu && !atSaveLoadScreen && !missionComplete) {
                 if (paused && countdown == -1) {
                     countdown = 3; countdownFrame = 0;
                 } else {
                     paused = !paused;
                     pauseMenuSelection = 0;
-                    if (paused) { pauseHistoryFocused = false; dialogueSys.history.resetView(); }
+                    if (paused) {
+                        pauseHistoryFocused = false; dialogueSys.history.resetView();
+                        audio.stopVoice();
+                    }
                 }
             }
 
@@ -280,6 +413,9 @@ public:
             } else if (atSoundMenu) {
                 updateSoundMenu(keys);
                 drawSoundMenu();
+            } else if (atSaveLoadScreen) {
+                updateSaveLoadScreen(keys);
+                drawSaveLoadScreen();
             } else if (gameOver) {
                 updateGameOverScreen(keys, running);
                 drawGameplayFrame();
@@ -291,26 +427,490 @@ public:
                 else if (paused) drawPauseMenu();
             } else {
                 // ======== GAMEPLAY ========
+                playFrames++;
                 updateGameplay(keys);
+                // 章节起点 / Ch2 流程段落切换 → 写入 AUTO 槽（旁白阻塞结束后才落盘）
+                if (pendingAutoSave && !inNarration && !gameOver && !missionComplete) {
+                    pendingAutoSave = false;
+                    std::string autoErr;
+                    saveToPath(SaveSystem::slotPath(0), autoErr);
+                }
                 drawGameplayFrame();
                 if (missionComplete) drawMissionComplete();
                 if (paused && countdown >= 0) drawCountdown();
                 else if (paused) drawPauseMenu();
             }
-
-            renderer.present();
-
-            Uint32 now = SDL_GetTicks();
-            Uint32 elapsed = now - lastTime;
-            if (elapsed < 16) SDL_Delay(16 - elapsed);
-            lastTime = SDL_GetTicks();
         }
+    }
+
+    // ======== 开发自检（--selftest）========
+    // 验证「暂停存档 → 继续玩一段（状态大幅改变）→ 读档」能回到与存档瞬间一致的状态与画面。
+    // 每个场景检查：状态字节完全一致 / 画面像素一致（容差统计）/ 期间画面确实变化过 /
+    //               文件元数据可读 / 读档后进入"暂停+菜单"状态。
+    // 返回 0=PASS，1=FAIL；会在存档目录写 selftest_tmp.sav 并在结束时删除。
+    bool renderToPixels(std::vector<uint32_t>& out) {
+        SDL_Texture* tex = SDL_CreateTexture(renderer.get(), SDL_PIXELFORMAT_ARGB8888,
+                                             SDL_TEXTUREACCESS_TARGET, WIN_WIDTH, WIN_HEIGHT);
+        if (!tex) return false;
+        SDL_SetRenderTarget(renderer.get(), tex);
+        drawGameplayFrame();
+        out.assign((size_t)WIN_WIDTH * WIN_HEIGHT, 0);
+        bool ok = SDL_RenderReadPixels(renderer.get(), NULL, SDL_PIXELFORMAT_ARGB8888,
+                                      out.data(), WIN_WIDTH * 4) == 0;
+        SDL_SetRenderTarget(renderer.get(), NULL);
+        SDL_DestroyTexture(tex);
+        return ok;
+    }
+
+    static uint32_t crcOfPixels(const std::vector<uint32_t>& px) {
+        return saveCrc32((const unsigned char*)px.data(), px.size() * sizeof(uint32_t));
+    }
+
+    // 把某个界面画到离屏目标并导出 BMP（仅 --selftest 用于人工核对排版）
+    bool captureBmp(const char* path) {
+        std::vector<uint32_t> px((size_t)WIN_WIDTH * WIN_HEIGHT, 0);
+        if (SDL_RenderReadPixels(renderer.get(), NULL, SDL_PIXELFORMAT_ARGB8888,
+                                 px.data(), WIN_WIDTH * 4) != 0) return false;
+        SDL_Surface* surf = SDL_CreateRGBSurfaceFrom(px.data(), WIN_WIDTH, WIN_HEIGHT, 32, WIN_WIDTH * 4,
+                                                     0x00FF0000u, 0x0000FF00u, 0x000000FFu, 0xFF000000u);
+        if (!surf) return false;
+        bool ok = (SDL_SaveBMP(surf, path) == 0);
+        SDL_FreeSurface(surf);
+        return ok;
+    }
+    bool shotBegin() {
+        SDL_Texture* tex = SDL_CreateTexture(renderer.get(), SDL_PIXELFORMAT_ARGB8888,
+                                             SDL_TEXTUREACCESS_TARGET, WIN_WIDTH, WIN_HEIGHT);
+        if (!tex) return false;
+        SDL_SetRenderTarget(renderer.get(), tex);
+        SDL_DestroyTexture(tex);   // 目标保持有效直到 resetTarget
+        return true;
+    }
+    void shotEnd() { SDL_SetRenderTarget(renderer.get(), NULL); }
+
+    // 界面截图组合（pause/存档界面需要游戏画面垫底）
+    void shotStartScreen()   { drawStartScreen(); }
+    void shotLoadScreen()    { drawSaveLoadScreen(); }
+    void shotPauseMenu()     { drawGameplayFrame(); drawPauseMenu(); }
+    void shotSaveFromPause() { drawGameplayFrame(); drawSaveLoadScreen(); }
+    void shotBrowser()       { drawGameplayFrame(); drawSaveLoadScreen(); }
+
+    void dumpScreens(const std::string& dir) {
+        SaveSystem::ensureDir(dir);
+        struct Shot { const char* file; void (Game::*fn)(); };
+        const Shot shots[5] = {
+            {"01_start.bmp",       &Game::shotStartScreen},
+            {"02_load_slots.bmp",  &Game::shotLoadScreen},
+            {"03_pause_menu.bmp",  &Game::shotPauseMenu},
+            {"04_save_slots.bmp",  &Game::shotSaveFromPause},
+            {"05_file_browser.bmp",&Game::shotBrowser}
+        };
+        // 主菜单
+        resetGame(); atStartScreen = true; buildStartMenu();
+        // 读档列表（主菜单路径）
+        shotBegin(); refreshSlotMeta(); saveMenuFromPause = false; saveMenu.openLoad(); (this->*shots[0].fn)();
+        captureBmp((dir + "/" + shots[0].file).c_str()); shotEnd();
+
+        shotBegin(); refreshSlotMeta(); saveMenuFromPause = false;
+        saveMenu.openLoad(); saveMenu.cursor = 1;
+        (this->*shots[1].fn)();
+        captureBmp((dir + "/" + shots[1].file).c_str()); shotEnd();
+
+        // 暂停菜单 + 存档列表（第二章战斗中垫底）
+        chapterMgr.selectChapter(1);
+        resetGame(); atStartScreen = false; isNormalPlay = true;
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        ch2Flow = C2_CHASE; dChaseQueued = true; score = 25;
+        player = &nightElf; nightElf.reset();
+        nightElf.setX(160); nightElf.setY(300);
+        pulseSystem.unlocked = true; pulseSystem.energy = 18;
+        dmMgr.spawnEnemy(); skillOrb.spawn(520.0, 220.0);
+        std::vector<Uint8> noKeys(SDL_NUM_SCANCODES, 0);
+        for (int i = 0; i < 150; ++i) updateGameplay(noKeys.data());
+        shotBegin(); paused = true; pauseMenuSelection = 1;
+        saveMenuFromPause = true; (this->*shots[2].fn)();
+        captureBmp((dir + "/" + shots[2].file).c_str()); shotEnd();
+
+        shotBegin(); refreshSlotMeta(); saveMenuFromPause = true;
+        saveMenu.openSave(); saveMenu.cursor = 2;
+        (this->*shots[3].fn)(); captureBmp((dir + "/" + shots[3].file).c_str()); shotEnd();
+
+        shotBegin(); saveMenuFromPause = true;
+        saveMenu.openBrowser(false); saveMenu.cursor = 2;
+        (this->*shots[4].fn)(); captureBmp((dir + "/" + shots[4].file).c_str()); shotEnd();
+
+        printf("[selftest] screenshots -> %s/0{1..5}_*.bmp\n", dir.c_str());
+    }
+
+    // 单个场景的存档往返验证
+    int selfTestRoundTrip(const char* label, const std::vector<Uint8>& keys) {
+        int failures = 0;
+        std::vector<uint32_t> pxA;
+        if (!renderToPixels(pxA)) { printf("[selftest] %-10s cannot read rendered pixels\n", label); return 1; }
+        uint32_t hA = crcOfPixels(pxA);
+
+        // 存档（序列化 + 打包 + 真实写盘 + 元数据读取）
+        SaveArchive w(true);
+        serializeAll(w);
+        if (w.bad) { printf("[selftest] %-10s serialize error\n", label); return 1; }
+        std::vector<unsigned char> payload = w.buf;
+        std::vector<unsigned char> file = SaveSystem::pack(payload);
+        std::string tmpPath = SaveSystem::baseDir() + "/selftest_tmp.sav";
+        bool wrote = SaveSystem::writeBytes(tmpPath, file);
+        SaveMeta meta; std::string merr;
+        bool metaOk = wrote && SaveSystem::readMeta(tmpPath, meta, merr);
+        if (!metaOk) { printf("[selftest] %-10s save-file/meta FAIL (%s)\n", label, merr.c_str()); failures++; }
+
+        // 继续玩 180 帧，状态应显著变化
+        for (int i = 0; i < 180; ++i) updateGameplay(keys.data());
+        std::vector<uint32_t> pxMid;
+        renderToPixels(pxMid);
+        bool mutated = (crcOfPixels(pxMid) != hA);
+
+        // 读档（真实读盘 + 校验 + 反序列化）
+        std::vector<unsigned char> file2;
+        SaveArchive r(false);
+        std::string err;
+        bool ok = SaveSystem::readBytes(tmpPath, file2) && SaveSystem::unpack(file2, r, err);
+        if (!ok) { printf("[selftest] %-10s load FAIL (%s)\n", label, err.c_str()); remove(tmpPath.c_str()); return 1; }
+        serializeAll(r);
+        if (r.bad) { printf("[selftest] %-10s deserialize corrupt\n", label); remove(tmpPath.c_str()); return 1; }
+
+        // 状态字节比对（SaveMeta.savedAt 是写档时的墙上时间，比较时跳过）
+        SaveArchive w2(true);
+        serializeAll(w2);
+        std::vector<unsigned char> cmpA = payload, cmpB = w2.buf;
+        for (size_t i = 8; i < 12 && i < cmpA.size() && i < cmpB.size(); ++i) { cmpA[i] = 0; cmpB[i] = 0; }
+        bool sameBytes = (cmpA == cmpB);
+
+        // 画面比对（技能球/能量条的呼吸光效用实时时钟，允许极小容差）
+        std::vector<uint32_t> pxB;
+        renderToPixels(pxB);
+        int maxDiff = 0, over8 = 0;
+        for (size_t i = 0; i < pxA.size() && i < pxB.size(); ++i) {
+            for (int sh = 0; sh < 32; sh += 8) {
+                int d = (int)((pxA[i] >> sh) & 0xFF) - (int)((pxB[i] >> sh) & 0xFF);
+                if (d < 0) d = -d;
+                if (d > maxDiff) maxDiff = d;
+                if (d > 8) over8++;
+            }
+        }
+        int totalCh = (int)pxA.size() * 4;
+        double badPct = totalCh ? 100.0 * over8 / totalCh : 0.0;
+        bool frameSame = (maxDiff <= 96 && badPct <= 1.0);
+
+        printf("[selftest] %-10s bytes=%-3s frame=%-3s maxdiff=%d bad=%.3f%% mutated=%-3s meta=%-2s payload=%u\n",
+               label, sameBytes ? "OK" : "BAD", frameSame ? "OK" : "BAD", maxDiff, badPct,
+               mutated ? "yes" : "NO", metaOk ? "OK" : "BAD", (unsigned)payload.size());
+        if (!sameBytes) {
+            int shown = 0;
+            for (size_t i = 0; i < cmpA.size() && i < cmpB.size() && shown < 6; ++i)
+                if (cmpA[i] != cmpB[i]) { printf("[selftest]   diff@%zu: %02X vs %02X\n", i, cmpA[i], cmpB[i]); shown++; }
+            failures++;
+        }
+        if (!frameSame)   failures++;
+        if (!mutated)     failures++;
+
+        // 读档收尾：应定格在"暂停 + 暂停菜单"，倒计时留给玩家 RESUME 触发
+        finishLoad();
+        if (!paused || countdown != -1 || !atStartScreen == false) failures++;
+        remove(tmpPath.c_str());
+        return failures;
+    }
+
+    int runSelfTest() {
+        printf("[selftest] save/load round-trip verification\n");
+        printf("[selftest] save dir: %s\n", SaveSystem::baseDir().c_str());
+        std::vector<Uint8> keys(SDL_NUM_SCANCODES, 0);
+        int failures = 0;
+
+        // ---- 场景 1：第二章追逐战（普敌 + 弹幕 + 技能球 + 粒子 + 脉冲波）----
+        chapterMgr.selectChapter(1);
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        bulletMgr.updateParams(1); shockwaveMgr.updateParams(1);
+        ch2Flow = C2_CHASE; dChaseQueued = true;
+        autoSpawnPhase = 2; autoSpawnQueued = 2; autoSpawnTimer = 0;
+        score = 25;
+        player = &nightElf; nightElf.reset();
+        nightElf.setX(120); nightElf.setY(300);
+        pulseSystem.unlocked = true; pulseSystem.energy = 15;
+        dmMgr.spawnEnemy();
+        skillOrb.spawn(520.0, 220.0);
+        particleMgr.spawnExplosion(300, 300, 24);
+        floatingTextMgr.spawn(300.0f, 280.0f, "SELFTEST");
+        for (int i = 0; i < 240; ++i) {
+            updateGameplay(keys.data());
+            if (i == 60) pulseSystem.release((float)nightElf.getX(), (float)nightElf.getY(), particleMgr, audio);
+            if (i == 120) { nightElf.setX(220); nightElf.setY(250); }
+        }
+        printf("[selftest] scene ch2-chase: aliens=%d danmaku=%d ebullets=%d pbullets=%d particles=%d\n",
+               ch2AlienMgr.countLiving(), (int)dmMgr.getEnemies().size(),
+               (int)ch2AlienMgr.getBullets().size() + (int)dmMgr.getBullets().size(),
+               (int)bulletMgr.all().size(), (int)particleMgr.all().size());
+        failures += selfTestRoundTrip("ch2-chase", keys);
+
+        // ---- 场景 2：第二章门禁序列（对话打字中 + 门禁脉冲/扫描）----
+        chapterMgr.selectChapter(1);
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        player = &ch2Trainer; ch2Trainer.reset();
+        for (int i = 0; i < 90; ++i) updateGameplay(keys.data());
+        printf("[selftest] scene ch2-gate: flow=%d stage=%d dialogueActive=%d\n",
+               ch2Flow, (int)gateScene.getStage(), dialogueSys.isActive() ? 1 : 0);
+        failures += selfTestRoundTrip("ch2-gate", keys);
+
+        // ---- 场景 3：第二章章节 Boss（Warden 弹幕循环 + 召唤增援）----
+        chapterMgr.selectChapter(1);
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        ch2Flow = C2_BOSS;
+        dLabQueued = true; dUpgradeQueued = true; dBossWarnQueued = true;
+        player = &nightElf; nightElf.reset();
+        nightElf.setX(150); nightElf.setY(300);
+        pulseSystem.unlocked = true; pulseSystem.energy = 20;
+        autoSpawnPhase = 6;
+        wardenBoss.startEntering();
+        for (int i = 0; i < 420; ++i) {
+            updateGameplay(keys.data());
+            if (i % 60 == 0) { ch2PlayerHP = 3; ch2GameOver = false; gameOver = false; }
+        }
+        printf("[selftest] scene ch2-warden: bossState=%d hp=%d bossBullets=%d aliens=%d\n",
+               (int)wardenBoss.getState(), wardenBoss.getHp(), (int)wardenBoss.bullets.size(),
+               ch2AlienMgr.countLiving());
+        failures += selfTestRoundTrip("ch2-warden", keys);
+
+        // ---- 场景 4：第一章 Boss 战（透视背景 + 冲击波 + Telamondo）----
+        chapterMgr.selectChapter(0);
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        bulletMgr.updateParams(6); shockwaveMgr.updateParams(6);
+        score = 200; enemiesEnabled = true;
+        boss.setY(90); boss.hpRef() = 500; boss.setMaxHp(1000); boss.bonusHpRef() = 0;
+        boss.setActive(true); boss.enteringRef() = false;
+        boss.phase2TriggeredRef() = true; boss.flashTimerRef() = 0;
+        phase = PHASE_BOSS_FIGHT;
+        boss.setCh1HealWavesEnabled(true);
+        shockwaveMgr.setPending(true);
+        player = &trainingPlane; trainingPlane.reset();
+        alienMgr.spawnAlien(score); alienMgr.spawnAlien(score);
+        for (int i = 0; i < 240; ++i) {
+            updateGameplay(keys.data());
+            boss.shakeTimerRef() = 0;    // 屏幕抖动会临时切换渲染目标，自检期间关掉
+        }
+        printf("[selftest] scene ch1-boss: bossHp=%d aliens=%d shockwaves=%d particles=%d\n",
+               boss.getHp(), alienMgr.countAlive(), (int)shockwaveMgr.all().size(),
+               (int)particleMgr.all().size());
+        failures += selfTestRoundTrip("ch1-boss", keys);
+
+        // ---- 场景 5：菜单接线（合成按键驱动真实 stepFrame）----
+        failures += uiSelfTest();
+
+        printf("[selftest] RESULT: %s\n", failures == 0 ? "PASS" : "FAIL");
+        return failures == 0 ? 0 : 1;
+    }
+
+    // 菜单流程自检：主菜单→LOAD GAME→AUTO 槽→确认→读档；暂停菜单→RESUME→倒计时；
+    // ESC 暂停→SAVE GAME→写槽位。用合成按键状态驱动 stepFrame（与 run() 完全同一条代码路径）。
+    int uiSelfTest() {
+        printf("[selftest] ui flow (synthetic keys)\n");
+        int failures = 0;
+        std::vector<Uint8> none(SDL_NUM_SCANCODES, 0);
+        std::vector<Uint8> down(SDL_NUM_SCANCODES, 0);  down[SDL_SCANCODE_S] = 1;
+        std::vector<Uint8> enter(SDL_NUM_SCANCODES, 0); enter[SDL_SCANCODE_RETURN] = 1;
+        std::vector<Uint8> esck(SDL_NUM_SCANCODES, 0);  esck[SDL_SCANCODE_ESCAPE] = 1;
+        bool running = true;
+        auto step = [&](const std::vector<Uint8>& k, int n, bool escEvent = false) {
+            for (int i = 0; i < n; ++i) stepFrame(k.data(), escEvent, running);
+        };
+
+        // 0) 先造一个已知存档（AUTO 槽），并记下分数
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        score = 77; ch2PlayerHP = 3;
+        std::string werr;
+        bool wroteAuto = saveToPath(SaveSystem::slotPath(0), werr);
+        int savedScore = score;
+
+        // 1) 主菜单：按 S 走到 LOAD GAME 并进入
+        resetGame();
+        atStartScreen = true;
+        startMenuSelection = 0;
+        step(none, 2);
+        int loadIdx = -1;
+        for (int i = 0; i < startItemCount; ++i) if (startItemId[i] == SI_LOAD) loadIdx = i;
+        for (int i = 0; i < loadIdx; ++i) { step(down, 2); step(none, 1); }
+        step(enter, 2); step(none, 1);
+        bool inLoadScreen = atSaveLoadScreen && saveMenu.screen == SaveMenu::SCR_LOAD && !saveMenuFromPause;
+        printf("[selftest] ui write-auto=%s  main menu -> LOAD GAME: %s\n",
+               wroteAuto ? "ok" : "FAIL", inLoadScreen ? "ok" : "FAIL");
+        if (!wroteAuto || !inLoadScreen) failures++;
+
+        // 2) 选 AUTO 槽 → 确认框 → ENTER 确认 → 读档
+        step(enter, 2); step(none, 1);
+        bool confirmShown = saveMenu.confirmActive;
+        step(enter, 2); step(none, 1);
+        bool loaded = (!atSaveLoadScreen && paused && countdown == -1 && saveMenuFromPause);
+        printf("[selftest] ui confirm-box=%s  loaded(paused)=%s  score=%d (expect %d)\n",
+               confirmShown ? "ok" : "FAIL", loaded ? "ok" : "FAIL", score, savedScore);
+        if (!confirmShown || !loaded || score != savedScore) failures++;
+
+        // 3) 暂停菜单 RESUME → 3-2-1 倒计时 → 恢复游戏
+        pauseMenuSelection = 0;
+        step(enter, 2); step(none, 1);
+        bool counting = (paused && countdown == 3);
+        step(none, 150);
+        bool resumed = (!paused && countdown == -1);
+        printf("[selftest] ui countdown-start=%s  resumed=%s\n",
+               counting ? "ok" : "FAIL", resumed ? "ok" : "FAIL");
+        if (!counting || !resumed) failures++;
+
+        // 4) 游玩中 ESC 暂停 → SAVE GAME → 写入 SLOT 1
+        resetGame();
+        atStartScreen = false; isNormalPlay = true;
+        score = 42;
+        step(none, 2);
+        step(none, 1, true);          // ESC 事件 → 暂停
+        step(none, 2);
+        bool pausedByEsc = paused;
+        pauseMenuSelection = 1;       // SAVE GAME
+        step(enter, 2); step(none, 1);
+        bool inSaveScreen = atSaveLoadScreen && saveMenu.screen == SaveMenu::SCR_SAVE && saveMenuFromPause;
+        step(enter, 2); step(none, 1);  // 选 SLOT 1（空 → 直接保存）
+        SaveMeta m1; std::string merr;
+        bool slotOk = SaveSystem::readMeta(SaveSystem::slotPath(1), m1, merr) && m1.score == 42;
+        printf("[selftest] ui esc-pause=%s  save-screen=%s  slot1-score=%d\n",
+               pausedByEsc ? "ok" : "FAIL", inSaveScreen ? "ok" : "FAIL", slotOk ? m1.score : -1);
+        if (!pausedByEsc || !inSaveScreen || !slotOk) failures++;
+
+        // 5) 文件浏览器：进入 → ESC 返回读档列表
+        resetGame();
+        atStartScreen = true;
+        step(none, 2);
+        openLoadScreen(false);
+        step(none, 2);
+        saveMenu.cursor = SaveSystem::SLOT_COUNT;    // BROWSE FILE...
+        step(enter, 2); step(none, 1);
+        bool inBrowser = (saveMenu.screen == SaveMenu::SCR_BROWSER) && !saveMenu.browser.rows.empty();
+        step(esck, 2); step(none, 1);   // ESC 键 → 返回槽位列表（浏览器读的是按键状态，非事件）
+        step(none, 2);
+        bool backToList = (saveMenu.screen == SaveMenu::SCR_LOAD);
+        printf("[selftest] ui browser-open=%s rows=%d  esc-back=%s\n",
+               inBrowser ? "ok" : "FAIL", (int)saveMenu.browser.rows.size(), backToList ? "ok" : "FAIL");
+        if (!inBrowser || !backToList) failures++;
+
+        // 6) OPTIONS 设置持久化往返（写入 settings.dat 再读回）
+        aimAssistOn = true; voiceLang = 2;
+        audio.setSoundState(3, 9, -2, 4, 1);
+        storeSettings();
+        aimAssistOn = false; voiceLang = 0;
+        audio.setSoundState(7, 7, 0, 0, 0);
+        loadSettings();
+        bool settingsOk = aimAssistOn && voiceLang == 2 && audio.getBgmVolume() == 3 &&
+                          audio.getSfxVolume() == 9 && audio.getEqLow() == -2 &&
+                          audio.getEqMid() == 4 && audio.getEqHigh() == 1;
+        printf("[selftest] ui settings-persist=%s (aim=%d voice=%d bgm=%d sfx=%d eq=%d/%d/%d)\n",
+               settingsOk ? "ok" : "FAIL", aimAssistOn ? 1 : 0, voiceLang, audio.getBgmVolume(),
+               audio.getSfxVolume(), audio.getEqLow(), audio.getEqMid(), audio.getEqHigh());
+        if (!settingsOk) failures++;
+
+        // 7) 跨章节读档：第一章游玩中读取第二章存档（章节/背景/机体必须一起切换）
+        chapterMgr.selectChapter(0);
+        resetGame(); atStartScreen = false; isNormalPlay = true;
+        for (int i = 0; i < 30; ++i) stepFrame(none.data(), false, running);
+        chapterMgr.selectChapter(1);
+        resetGame(); atStartScreen = false; isNormalPlay = true;
+        player = &nightElf; nightElf.reset();
+        ch2Flow = C2_CHASE; dChaseQueued = true;
+        autoSpawnPhase = 1; autoSpawnQueued = 3; score = 33;
+        for (int i = 0; i < 90; ++i) updateGameplay(none.data());
+        saveToPath(SaveSystem::slotPath(2), werr);
+        chapterMgr.selectChapter(0);
+        resetGame(); atStartScreen = false; isNormalPlay = true;
+        for (int i = 0; i < 30; ++i) stepFrame(none.data(), false, running);
+        bool crossOk = loadFromPath(SaveSystem::slotPath(2), werr) &&
+                       chapterMgr.getCurrentIndex() == 1 &&
+                       chapterMgr.getConfig().isSideScrolling &&
+                       player == (Player*)&nightElf && score == 33 && paused;
+        paused = false;                      // 退出暂停，跑一段确认第二章分支不会崩
+        for (int i = 0; i < 90; ++i) stepFrame(none.data(), false, running);
+        std::vector<uint32_t> pxCross;
+        bool crossRender = renderToPixels(pxCross);
+        printf("[selftest] ui cross-chapter-load=%s render=%s chapter=%d side=%d\n",
+               crossOk ? "ok" : "FAIL", crossRender ? "ok" : "FAIL",
+               chapterMgr.getCurrentIndex(), chapterMgr.getConfig().isSideScrolling ? 1 : 0);
+        if (!crossOk || !crossRender) failures++;
+
+        // 8) 隐藏 TEST 入口（--test）只改变主菜单项，不影响 LOAD GAME
+        bool savedDev = devMode;
+        devMode = false; buildStartMenu();
+        int normalCount = startItemCount;
+        bool normalHasTest = false;
+        for (int i = 0; i < startItemCount; ++i) if (startItemId[i] == SI_TEST) normalHasTest = true;
+        devMode = true; buildStartMenu();
+        bool devHasTest = false;
+        for (int i = 0; i < startItemCount; ++i) if (startItemId[i] == SI_TEST) devHasTest = true;
+        devMode = savedDev; buildStartMenu();
+        bool menuOk = (normalCount == 5 && !normalHasTest && devHasTest);
+        printf("[selftest] ui menu-items normal=%d(hidden-test=%s) dev-test=%s\n",
+               normalCount, normalHasTest ? "shown" : "hidden", devHasTest ? "shown" : "MISSING");
+        if (!menuOk) failures++;
+
+        // 9) 列表最后一项 BACK → 回到主菜单
+        resetGame();
+        atStartScreen = true;
+        step(none, 2);
+        openLoadScreen(false);
+        step(none, 2);
+        saveMenu.cursor = saveMenu.loadRowCount() - 1;
+        step(enter, 2); step(none, 1);
+        bool backToMenu = (!atSaveLoadScreen && atStartScreen);
+        printf("[selftest] ui list-back-to-menu=%s\n", backToMenu ? "ok" : "FAIL");
+        if (!backToMenu) failures++;
+
+        // 10) 导出各界面截图，便于人工核对排版（无头渲染，不影响游戏）
+        dumpScreens("/tmp/sfss_shots");
+
+        resetGame();
+        return failures;
     }
 
 private:
     // ======== START SCREEN ========
+    // 菜单项：正常构建 = PLAY / CHAPTER / LOAD GAME / OPTIONS / EXIT
+    //           --test 开发构建额外保留 TEST（[DORMANT — 激活条件：命令行参数 --test]）
+    enum StartItem { SI_PLAY, SI_CHAPTER, SI_TEST, SI_LOAD, SI_OPTIONS, SI_EXIT, SI_COUNT_MAX };
+    int startItemCount;
+    int startItemId[6];
+
+    void buildStartMenu() {
+        int n = 0;
+        startItemId[n++] = SI_PLAY;
+        startItemId[n++] = SI_CHAPTER;
+        if (devMode) startItemId[n++] = SI_TEST;      // [DORMANT — 仅 --test 构建可见]
+        startItemId[n++] = SI_LOAD;
+        startItemId[n++] = SI_OPTIONS;
+        startItemId[n++] = SI_EXIT;
+        startItemCount = n;
+    }
+    static const char* startItemLabel(int id) {
+        switch (id) {
+            case SI_PLAY:    return "PLAY";
+            case SI_CHAPTER: return "CHAPTER";
+            case SI_TEST:    return "TEST";
+            case SI_LOAD:    return "LOAD GAME";
+            case SI_OPTIONS: return "OPTIONS";
+            default:         return "EXIT";
+        }
+    }
+
     void updateStartScreen(const Uint8* keys, bool& running) {
         static bool sJustEntered = true;
+        if (startItemCount == 0) buildStartMenu();
         bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
         bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
         bool enterNow = keys[SDL_SCANCODE_RETURN];
@@ -319,25 +919,33 @@ private:
             upWas = upNow; downWas = downNow; enterWas = enterNow;
             sJustEntered = false;
         }
-        if (upNow && !upWas && startMenuSelection > 0)     startMenuSelection--;
-        if (downNow && !downWas && startMenuSelection < 4) startMenuSelection++;
+        if (upNow && !upWas && startMenuSelection > 0)                 startMenuSelection--;
+        if (downNow && !downWas && startMenuSelection < startItemCount - 1) startMenuSelection++;
         if (enterNow && !enterWas) {
-            if (startMenuSelection == 0) {
+            int act = startItemId[startMenuSelection];
+            if (act == SI_PLAY) {
                 resetGame(); atStartScreen = false;
                 isNormalPlay = true;
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
                 startChapterNarration();
+                pendingAutoSave = true;      // 章节起点写入 AUTO 槽
                 sJustEntered = true;
-            } else if (startMenuSelection == 1) {
+            } else if (act == SI_CHAPTER) {
                 atStartScreen = false; atChapterSelect = true;
                 chapterSelection = 0; sJustEntered = true;
-            } else if (startMenuSelection == 2) {
+            } else if (act == SI_TEST) {
                 atStartScreen = false; atTestSelect = true;
                 testScoreSelection = 0; testChapterSelection = 0;
                 testAtChapterSelect = true; sJustEntered = true;
-            } else if (startMenuSelection == 3) {
+            } else if (act == SI_LOAD) {
+                refreshSlotMeta();
+                atStartScreen = false; atSaveLoadScreen = true;
+                saveMenuFromPause = false; saveMenu.openLoad();
+                upWas = downWas = enterWas = escWas = true;
+                sJustEntered = true;
+            } else if (act == SI_OPTIONS) {
                 atStartScreen = false; atOptionScreen = true;
                 optionFromPause = false; optionCursor = 0;
                 optionJustEntered = true; sJustEntered = true;
@@ -357,21 +965,24 @@ private:
         SDL_RenderDrawLine(r, CENTER_X - 200, 140, CENTER_X + 200, 140);
         SDL_RenderDrawLine(r, CENTER_X - 200, 142, CENTER_X + 200, 142);
 
-        const char* items[5] = {"PLAY", "CHAPTER", "TEST", "OPTIONS", "EXIT"};
-        const int MENU_Y0 = 210, GAP = 48;
-        for (int i = 0; i < 5; ++i) {
-            int itemW = (int)strlen(items[i]) * 6 * 4;
+        if (startItemCount == 0) buildStartMenu();
+        const int MENU_Y0 = 200, GAP = 48;
+        for (int i = 0; i < startItemCount; ++i) {
+            const char* label = startItemLabel(startItemId[i]);
+            int itemW = (int)strlen(label) * 6 * 4;
             int itemX = CENTER_X - itemW / 2;
             int itemY = MENU_Y0 + i * GAP;
-            font.drawString(r, items[i], itemX, itemY, 4);
+            font.drawString(r, label, itemX, itemY, 4);
             if (i == startMenuSelection) {
                 UIRenderer::drawMenuCursor(r, itemX - 30, itemY + 14, 12);
                 UIRenderer::drawMenuUnderline(r, itemX, itemY + 32, itemW);
             }
         }
-        font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 490, 2);
+        font.drawString(r, "W/S:select  ENTER:confirm", CENTER_X - 150, 500, 2);
         SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
-        font.drawString(r, "Ver 1.2.21", 15, WIN_HEIGHT - 30, 2);
+        font.drawString(r, "Ver 1.2.23", 15, WIN_HEIGHT - 30, 2);
+        // 存档目录提示（读档列表为空时方便排查）
+        font.drawString(r, SaveSystem::baseDir().c_str(), 15, WIN_HEIGHT - 16, 1);
     }
 
     // ======== CHAPTER SCREEN ========
@@ -390,6 +1001,7 @@ private:
                 bulletMgr.updateParams(0);
                 shockwaveMgr.updateParams(0);
                 startChapterNarration();
+                pendingAutoSave = true;      // 章节起点写入 AUTO 槽
             }
         }
         if (mk.esc && !escWas) { atChapterSelect = false; atStartScreen = true; cJustEntered = true; }
@@ -422,6 +1034,9 @@ private:
     }
 
     // ======== TEST SCREEN ========
+    // [DORMANT — 激活条件：命令行参数 --test（由 main.cpp 解析后传入 devMode）]
+    // 原开发用测试模式：直接跳转到预设状态（章节/分数/Boss 阶段/Ch2 流程段落）。
+    // 正常构建不显示入口，主菜单该项位置由 LOAD GAME 取代；逻辑保持可用，便于开发时跳关复现。
     void updateTestScreen(const Uint8* keys) {
         static bool tJustEntered = true;
         MenuKeys mk(keys);
@@ -441,14 +1056,14 @@ private:
         } else {
             // Level 2: sub-menu for selected chapter
             bool isCh2 = chapterMgr.getConfig().isSideScrolling;
-            int maxSel = isCh2 ? 2 : 9;
+            int maxSel = isCh2 ? 5 : 9;
             if (mk.esc && !escWas) { testAtChapterSelect = true; tJustEntered = true; }
             if (mk.up && !upWas && testScoreSelection > 0)     testScoreSelection--;
             if (mk.down && !downWas && testScoreSelection < maxSel) testScoreSelection++;
         if (mk.enter && !enterWas) {
             int savedSel = testScoreSelection;
             if (isCh2) {
-                // Chapter 2 sub-menu: two entry points
+                // Chapter 2 sub-menu: six entry points
                 resetGame(); atStartScreen = false; atTestSelect = false;
                 isNormalPlay = false;
                 alienMgr.applyChapterConfig(chapterMgr.getConfig());
@@ -456,17 +1071,44 @@ private:
                 shockwaveMgr.updateParams(0);
                 dmFireCooldown = 0;
                 if (savedSel == 0) {
-                    // Option 0: Full boss entry (entrance animation → fight → debris → combat)
+                    // Option 0: Full sphere boss entry (entrance animation → fight → debris → combat)
+                    ch2Flow = C2_SPHERE;
+                    dSphereIntroQueued = true; dSphereActQueued = true; dChaseQueued = true;
                     sphereBoss.init(sideBg, player);
                     sphereBossActive = true;
                     sphereBoss.startEntering();
                 } else if (savedSel == 1) {
                     // Option 1: Skip to combat (boss done, auto-spawn wave 1)
+                    ch2Flow = C2_CHASE;
+                    dChaseQueued = true;
                     autoSpawnPhase = 1; autoSpawnQueued = 3; autoSpawnTimer = 0;
-                } else {
+                } else if (savedSel == 2) {
                     // Option 2: Score 25 + first danmaku spawn (for pulse orb testing)
+                    ch2Flow = C2_CHASE;
+                    dChaseQueued = true;
                     score = 25; autoSpawnPhase = 6; autoSpawnScoreBase = 0;
                     dmMgr.spawnEnemy();
+                } else if (savedSel == 3) {
+                    // Option 3: Gate sequence (opening scene: dialogue → pulses → scan → door)
+                    // resetGame() already set ch2Flow = C2_GATE — nothing more needed
+                } else if (savedSel == 4) {
+                    // Option 4: NightElf lab (touch the prototype to upgrade)
+                    ch2Flow = C2_LAB;
+                    dLabQueued = true; dUpgradeQueued = true;
+                    sideBg->setSpeed(0);
+                    pulseSystem.unlocked = true;
+                    pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY;
+                } else {
+                    // Option 5: Warden boss fight (NightElf + pulse ready)
+                    ch2Flow = C2_BOSS;
+                    dLabQueued = true; dUpgradeQueued = true; dBossWarnQueued = true;
+                    player = &nightElf;
+                    nightElf.reset();
+                    nightElf.setX(100); nightElf.setY(WIN_HEIGHT / 2);
+                    pulseSystem.unlocked = true;
+                    pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY;
+                    autoSpawnPhase = 6;   // energy wall active
+                    wardenBoss.startEntering();
                 }
                 tJustEntered = true; return;
             }
@@ -623,9 +1265,10 @@ private:
                 font.drawString(r, "TEST - CHAPTER 2", CENTER_X - 192, 50, 4);
                 SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
                 SDL_RenderDrawLine(r, CENTER_X - 180, 90, CENTER_X + 180, 90);
-                const char* labels[3] = {"SPHERE BOSS FULL", "COMBAT ONLY", "PULSE ORB TEST"};
+                const char* labels[6] = {"SPHERE BOSS FULL", "COMBAT ONLY", "PULSE ORB TEST",
+                                         "GATE SEQUENCE", "NIGHTELF LAB", "WARDEN BOSS"};
                 const int MENU_Y0 = 140, GAP = 52;
-                for (int i = 0; i < 3; ++i) {
+                for (int i = 0; i < 6; ++i) {
                     int itemW = (int)strlen(labels[i]) * 6 * 3;
                     int itemX = CENTER_X - itemW / 2;
                     int itemY = MENU_Y0 + i * GAP;
@@ -657,16 +1300,316 @@ private:
         }
     }
 
+    // ======== SAVE / LOAD ========
+    // 存档原理：暂停时把"当前这一帧的全部游戏状态"按固定顺序序列化写入文件；
+    // 读档时反序列化回同一批成员，然后强制进入 paused 状态——
+    // 于是重绘出来的就是存档瞬间那一帧，玩家按 RESUME → 3-2-1 倒计时 → 从原状态继续。
+    // 所有可变量都在 serializeAll() 里列出；字段顺序即字节顺序。
+    int playerPlaneIndex() const {
+        if (player == (Player*)&nightElf) return 1;
+        if (player == (Player*)&ch2Trainer) return 0;
+        return 2;   // TrainingPlane（第一章）
+    }
+
+    SaveMeta buildMeta() const {
+        SaveMeta m;
+        m.savedAt = (uint32_t)time(nullptr);
+        m.playFrames = playFrames;
+        m.chapterIdx = chapterMgr.getCurrentIndex();
+        m.setTitle(chapterMgr.getConfig().title);
+        m.score = score;
+        m.baseHP = baseHP;
+        m.playerHP = ch2PlayerHP;
+        m.flow = chapterMgr.getConfig().isSideScrolling ? ch2Flow : -1;
+        m.plane = playerPlaneIndex();
+        m.valid = true;
+        return m;
+    }
+
+    // 读档：先按存档切章节（决定 isSideScrolling / 背景与难度配置），再恢复其余状态
+    void applyMetaToChapter(const SaveMeta& meta) {
+        int idx = meta.chapterIdx;
+        if (idx < 0) idx = 0;
+        if (idx > 4) idx = 4;
+        chapterMgr.selectChapter(idx);
+        boss.setConfig(&chapterMgr.getConfig().bossConfig);
+        alienMgr.applyChapterConfig(chapterMgr.getConfig());
+        if (background) { delete background; background = new Ch1Background(chapterMgr.getConfig()); }
+    }
+
+    // ---- 全量状态序列化（写=输出缓冲，读=还原成员）----
+    template <class Ar> void serializeAll(Ar& ar) {
+        SaveMeta meta;
+        if (ar.writing) meta = buildMeta();
+        ar.ioObj(meta);
+        if (ar.bad) return;
+        if (!ar.writing) applyMetaToChapter(meta);
+
+        // ---- 玩家机体（visit 是模板无法虚分派，按机体编号显式分发）----
+        if (ar.writing) {
+            if (meta.plane == 1)      ar.ioObj(nightElf);
+            else if (meta.plane == 0) ar.ioObj(ch2Trainer);
+            else                      ar.ioObj(trainingPlane);
+        } else {
+            if (meta.plane == 1)      { ar.ioObj(nightElf);      player = &nightElf; }
+            else if (meta.plane == 0) { ar.ioObj(ch2Trainer);    player = &ch2Trainer; }
+            else                      { ar.ioObj(trainingPlane); player = &trainingPlane; }
+        }
+
+        // ---- 全局标量 ----
+        ar.ioNum(score); ar.ioNum(baseHP); ar.ioNum(difficultyTimer);
+        ar.ioEnum(phase);
+        ar.ioBool(gameOver); ar.ioBool(aimAssistOn);
+        ar.ioBool(ch1DialogueDone); ar.ioBool(bossPhase2DialogueTriggered);
+        ar.ioBytes(triggeredScores, sizeof(triggeredScores));
+        ar.ioNum(baseFireTimer); ar.ioNum(lastScore); ar.ioBool(pauseHistoryFocused);
+        ar.ioBool(enemiesEnabled); ar.ioBool(isNormalPlay);
+        ar.ioNum(wallFlashTimer); ar.ioNum(wallContactY); ar.ioNum(wallAnimFrame);
+        ar.ioNum(menuSelection); ar.ioNum(mcMenuSelection);
+        // Ch2
+        ar.ioNum(ch2PlayerHP); ar.ioBool(ch2GameOver); ar.ioNum(dmFireCooldown);
+        ar.ioBool(sphereBossActive); ar.ioNum(playerHitCount); ar.ioNum(tripleBeepCounter);
+        ar.ioBool(pulseOrbDropped); ar.ioBool(shiftWas);
+        ar.ioNum(ch2Flow); ar.ioNum(ch2PhaseTimer); ar.ioNum(ch2FadeTimer);
+        ar.ioBool(ch2GateInitDone); ar.ioBool(ch2LabInitDone);
+        ar.ioNum(labUpgradeState); ar.ioNum(labUpgradeTimer); ar.ioBool(ch2EpilogueStarted);
+        ar.ioBool(dGateQueued); ar.ioBool(dMoonwellQueued); ar.ioBool(dCorridorQueued);
+        ar.ioBool(dSphereIntroQueued); ar.ioBool(dSphereActQueued);
+        ar.ioBool(dChaseQueued); ar.ioBool(dOrbQueued); ar.ioBool(dPulseQueued);
+        ar.ioBool(dLabQueued); ar.ioBool(dUpgradeQueued);
+        ar.ioBool(dBossWarnQueued); ar.ioBool(dBossEnrageQueued);
+        // 自动出敌调度
+        ar.ioNum(autoSpawnPhase); ar.ioNum(autoSpawnQueued); ar.ioNum(autoSpawnTimer);
+        ar.ioNum(autoSpawnWave3Reinf); ar.ioNum(autoSpawnScoreBase);
+        ar.ioNum(autoSpawnAliveLast); ar.ioNum(autoSpawnKillsLast);
+        ar.ioNum(lastShockwaveLevel);
+        // Ch1 Boss 击破演出
+        ar.ioNum(bossDefeatTimer); ar.ioNum(defeatAlienTimer); ar.ioNum(defeatReturnTimer);
+        ar.ioNum(defeatFWTimer); ar.ioNum(defeatMCDelay); ar.ioNum(defeatFadeTimer);
+        ar.ioBool(missionCompleteShown); ar.ioBool(missionComplete);
+        // 语音/旁白
+        ar.ioNum(voiceLang); ar.ioNum(lastNarrationPage); ar.ioNum(lastDialogueHash);
+        ar.ioBool(currentLineVoiced); ar.ioBool(inNarration);
+        ar.ioNum(playFrames);
+
+        // ---- 子系统 ----
+        ar.ioObj(bulletMgr);
+        ar.ioObj(alienMgr);
+        ar.ioObj(particleMgr);
+        ar.ioObj(shockwaveMgr);
+        ar.ioObj(boss);
+        ar.ioObj(floatingTextMgr);
+        ar.ioObj(narration);
+        ar.ioObj(dialogueSys);
+        ar.ioObj(ch2AlienMgr);
+        ar.ioObj(dmMgr);
+        ar.ioObj(sphereBoss);
+        ar.ioObj(nightElfEnergy);
+        ar.ioObj(pulseSystem);
+        ar.ioObj(skillOrb);
+        ar.ioObj(gateScene);
+        ar.ioObj(labScene);
+        ar.ioObj(wardenBoss);
+        ar.ioObj(*background);
+        ar.ioObj(*sideBg);
+    }
+
+    void refreshSlotMeta() {
+        for (int i = 0; i < SaveSystem::SLOT_COUNT; ++i) {
+            std::string path = SaveSystem::slotPath(i);
+            SaveMeta m;
+            std::string err;
+            if (SaveSystem::readMeta(path, m, err)) {
+                m.broken = false;
+                slotMeta[i] = m;
+            } else if (SaveSystem::fileExists(path)) {
+                // 文件在但读不出：损坏或版本不符 → 列表里明确提示，不要显示成"空槽位"
+                m.broken = true;
+                slotMeta[i] = m;
+            } else {
+                slotMeta[i] = SaveMeta();
+            }
+        }
+    }
+
+    bool saveToPath(const std::string& path, std::string& err) {
+        if (inNarration) { err = "CANNOT SAVE DURING NARRATION"; return false; }
+        SaveArchive ar(true);
+        serializeAll(ar);
+        if (ar.bad) { err = "SERIALIZE FAILED"; return false; }
+        std::vector<unsigned char> file = SaveSystem::pack(ar.buf);
+        if (!SaveSystem::writeBytes(path, file)) { err = "WRITE FAILED"; return false; }
+        return true;
+    }
+
+    bool loadFromPath(const std::string& path, std::string& err) {
+        std::vector<unsigned char> file;
+        if (!SaveSystem::readBytes(path, file)) { err = "CANNOT READ FILE"; return false; }
+        SaveArchive ar(false);
+        // 版本 / 长度 / CRC 校验全部通过后才动游戏状态
+        if (!SaveSystem::unpack(file, ar, err)) return false;
+        serializeAll(ar);
+        if (ar.bad) { err = "SAVE DATA CORRUPTED"; return false; }
+        finishLoad();
+        return true;
+    }
+
+    // 读档收尾：定格在"暂停 + 暂停菜单"，玩家 RESUME 后走 3-2-1 倒计时
+    void finishLoad() {
+        paused = true;
+        countdown = -1; countdownFrame = 0;
+        pauseMenuSelection = 0;
+        pauseHistoryFocused = false;
+        dialogueSys.history.resetView();
+        atStartScreen = false; atChapterSelect = false; atTestSelect = false;
+        atOptionScreen = false; atSoundMenu = false; atSaveLoadScreen = false;
+        saveMenuFromPause = true;
+        gameOver = false;
+        pendingAutoSave = false;
+        // 读档瞬间按住的键不允许触发菜单/对话跳过
+        upWas = downWas = enterWas = escWas = leftWas = rightWas = true;
+        pUpWas = pDownWas = pEnterWas = pLeftWas = pRightWas = true;
+        bkspWas = true;
+        shiftWas = true; shiftJustPressed = false;
+        dialogueSys.suppressEnter();
+        narration.suppressEnter();
+        if (sphereBossActive) sphereBoss.init(sideBg, player);   // 重新绑定读档后的机体指针
+        audio.stopVoice();
+    }
+
+    // ---- 存/读档界面 ----
+    // 统一入口：必须清掉其它界面标志，否则单帧分派会继续走旧界面（例如还停在主菜单）
+    void beginSaveLoadScreen(bool fromPause) {
+        atStartScreen = false; atChapterSelect = false; atTestSelect = false;
+        atOptionScreen = false; atSoundMenu = false;
+        atSaveLoadScreen = true;
+        saveMenuFromPause = fromPause;
+        upWas = downWas = enterWas = escWas = true;
+        bkspWas = true;
+    }
+    void openSaveScreen(bool fromPause) {
+        refreshSlotMeta();
+        beginSaveLoadScreen(fromPause);
+        saveMenu.openSave();
+    }
+    void openLoadScreen(bool fromPause) {
+        refreshSlotMeta();
+        beginSaveLoadScreen(fromPause);
+        saveMenu.openLoad();
+    }
+
+    void doSaveTo(const std::string& path) {
+        std::string err;
+        if (saveToPath(path, err)) {
+            refreshSlotMeta();
+            saveMenu.setStatus("GAME SAVED");
+            atSaveLoadScreen = false;
+            if (saveMenuFromPause) paused = true;
+            else atStartScreen = true;
+        } else {
+            saveMenu.setStatus("SAVE FAILED: " + err);
+        }
+    }
+
+    void doLoadFrom(const std::string& path) {
+        std::string err;
+        if (loadFromPath(path, err)) return;      // finishLoad() 已切到暂停画面
+        saveMenu.setStatus("LOAD FAILED: " + err);
+    }
+
+    void updateSaveLoadScreen(const Uint8* keys) {
+        bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
+        bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+        bool enterNow = keys[SDL_SCANCODE_RETURN];
+        bool escNow = keys[SDL_SCANCODE_ESCAPE];
+        bool bkspNow = keys[SDL_SCANCODE_BACKSPACE];
+
+        bool upP = upNow && !upWas, downP = downNow && !downWas;
+        bool enterP = enterNow && !enterWas, escP = escNow && !escWas;
+        bool bkspP = bkspNow && !bkspWas;
+        upWas = upNow; downWas = downNow; enterWas = enterNow;
+        escWas = escNow; bkspWas = bkspNow;
+
+        saveMenu.tickStatus();
+        int act = saveMenu.update(upP, downP, enterP, escP, bkspP);
+
+        switch (act) {
+            case SaveMenu::ACT_PICK_LOAD: {
+                int slot = saveMenu.pickedSlot;
+                if (!slotMeta[slot].valid && !slotMeta[slot].broken) { saveMenu.setStatus("SLOT IS EMPTY"); break; }
+                pendingSaveAction = 2; pendingSlot = slot;
+                saveMenu.askConfirm(slotMeta[slot].broken
+                                    ? std::string("THIS FILE MAY BE INCOMPATIBLE. LOAD ANYWAY?")
+                                    : std::string("LOAD ") + SaveSystem::slotLabel(slot) +
+                                      "? CURRENT PROGRESS WILL BE LOST");
+                break;
+            }
+            case SaveMenu::ACT_PICK_SAVE: {
+                int slot = saveMenu.pickedSlot;
+                if (slotMeta[slot].valid) {
+                    pendingSaveAction = 1; pendingSlot = slot;
+                    saveMenu.askConfirm(std::string("OVERWRITE ") + SaveSystem::slotLabel(slot) + "?");
+                } else {
+                    doSaveTo(SaveSystem::slotPath(slot));
+                }
+                break;
+            }
+            case SaveMenu::ACT_BROWSE_LOAD: saveMenu.openBrowser(false); break;
+            case SaveMenu::ACT_BROWSE_SAVE: saveMenu.openBrowser(true); break;
+            case SaveMenu::ACT_LOAD_FILE:
+                if (!SaveSystem::fileExists(saveMenu.pickedPath)) { saveMenu.setStatus("FILE NOT FOUND"); break; }
+                pendingSaveAction = 4; pendingPath = saveMenu.pickedPath;
+                saveMenu.askConfirm("LOAD THIS FILE? CURRENT PROGRESS WILL BE LOST");
+                break;
+            case SaveMenu::ACT_SAVE_FILE:
+                if (SaveSystem::fileExists(saveMenu.pickedPath)) {
+                    pendingSaveAction = 3; pendingPath = saveMenu.pickedPath;
+                    saveMenu.askConfirm("OVERWRITE EXISTING FILE?");
+                } else {
+                    doSaveTo(saveMenu.pickedPath);
+                }
+                break;
+            case SaveMenu::ACT_CONFIRM:
+                if (pendingSaveAction == 1)      doSaveTo(SaveSystem::slotPath(pendingSlot));
+                else if (pendingSaveAction == 2) doLoadFrom(SaveSystem::slotPath(pendingSlot));
+                else if (pendingSaveAction == 3) doSaveTo(pendingPath);
+                else if (pendingSaveAction == 4) doLoadFrom(pendingPath);
+                pendingSaveAction = 0;
+                break;
+            case SaveMenu::ACT_CANCEL:
+                pendingSaveAction = 0;
+                break;
+            case SaveMenu::ACT_BACK:
+                if (saveMenu.screen == SaveMenu::SCR_BROWSER) {
+                    if (saveMenu.browser.saveMode) saveMenu.openSave();
+                    else saveMenu.openLoad();
+                } else {
+                    atSaveLoadScreen = false;
+                    if (saveMenuFromPause) { paused = true; countdown = -1; }
+                    else atStartScreen = true;
+                }
+                break;
+            default: break;
+        }
+    }
+
+    void drawSaveLoadScreen() {
+        if (saveMenuFromPause) drawGameplayFrame();    // 暂停中的原画面作为背景
+        if (saveMenu.screen == SaveMenu::SCR_BROWSER) saveMenu.drawBrowser(renderer.get(), font);
+        else saveMenu.drawSlots(renderer.get(), font, slotMeta, saveMenuFromPause);
+    }
+
     // ======== OPTIONS SCREEN ========
     void updateOptionScreen(const Uint8* keys) {
         static bool oJustEntered = true;
         MenuKeys mk(keys);
         if (oJustEntered) { upWas=mk.up; downWas=mk.down; enterWas=mk.enter; escWas=mk.esc; oJustEntered=false; }
         if (mk.up && !upWas && optionCursor > 0)    optionCursor--;
-        if (mk.down && !downWas && optionCursor < 1) optionCursor++;
+        if (mk.down && !downWas && optionCursor < 2) optionCursor++;
         if (mk.enter && !enterWas) {
-            if (optionCursor == 0) aimAssistOn = !aimAssistOn;
-            else if (optionCursor == 1) { atSoundMenu = true; oJustEntered = true; }
+            if (optionCursor == 0) { aimAssistOn = !aimAssistOn; storeSettings(); }
+            else if (optionCursor == 1) { voiceLang = (voiceLang + 1) % 3; storeSettings(); }   // 0=中文 1=English 2=OFF
+            else if (optionCursor == 2) { atSoundMenu = true; oJustEntered = true; }
         }
         if (mk.esc && !escWas) {
             optionCursor = 0; atOptionScreen = false; oJustEntered = true;
@@ -683,9 +1626,9 @@ private:
         font.drawString(r, "OPTIONS", CENTER_X - 84, 40, 4);
         SDL_SetRenderDrawColor(r, 100, 100, 100, 255);
         SDL_RenderDrawLine(r, CENTER_X - 180, 78, CENTER_X + 180, 78);
-        const char* labels[2] = {"AIM ASSIST", "SOUND"};
-        const int Y0 = 130, GAP = 70;
-        for (int i = 0; i < 2; ++i) {
+        const char* labels[3] = {"AIM ASSIST", "VOICE LANG", "SOUND"};
+        const int Y0 = 120, GAP = 66;
+        for (int i = 0; i < 3; ++i) {
             int ly = Y0 + i * GAP;
             int lx = CENTER_X - 120;
             if (i == optionCursor) UIRenderer::drawMenuCursor(r, lx - 22, ly + 7, 10);
@@ -695,6 +1638,13 @@ private:
                 SDL_Rect tg = {CENTER_X + 80, ly - 2, 56, 26};
                 SDL_RenderFillRect(r, &tg);
                 font.drawString(r, aimAssistOn ? "ON" : "OFF", CENTER_X + 88, ly + 4, 2);
+            } else if (i == 1) {
+                // VOICE LANG: 0=中文(ZH) 1=English(EN) 2=OFF (letter pops only)
+                const char* vlLabels[3] = {"ZH", "EN", "OFF"};
+                font.drawString(r, vlLabels[voiceLang], CENTER_X + 92, ly + 4, 2);
+                SDL_SetRenderDrawColor(r, 120, 120, 120, 255);
+                SDL_Rect tg = {CENTER_X + 80, ly - 2, 62, 26};
+                SDL_RenderDrawRect(r, &tg);
             } else {
                 font.drawString(r, ">", CENTER_X + 80, ly, 3);
             }
@@ -721,20 +1671,22 @@ private:
         if (mk.esc && !escWas)  { atSoundMenu = false; sJustEntered = true; }
         if (mk.enter && !enterWas && soundCursor == 5) { atSoundMenu = false; sJustEntered = true; }
 
+        bool changed = false;
         if (leftNow && !leftWas) {
-            if (soundCursor == 0) audio.adjBgmVolume(-1);
-            if (soundCursor == 1) audio.adjSfxVolume(-1);
-            if (soundCursor == 2) audio.adjEqLow(-1);
-            if (soundCursor == 3) audio.adjEqMid(-1);
-            if (soundCursor == 4) audio.adjEqHigh(-1);
+            if (soundCursor == 0) { audio.adjBgmVolume(-1); changed = true; }
+            if (soundCursor == 1) { audio.adjSfxVolume(-1); changed = true; }
+            if (soundCursor == 2) { audio.adjEqLow(-1); changed = true; }
+            if (soundCursor == 3) { audio.adjEqMid(-1); changed = true; }
+            if (soundCursor == 4) { audio.adjEqHigh(-1); changed = true; }
         }
         if (rightNow && !rightWas) {
-            if (soundCursor == 0) audio.adjBgmVolume(1);
-            if (soundCursor == 1) audio.adjSfxVolume(1);
-            if (soundCursor == 2) audio.adjEqLow(1);
-            if (soundCursor == 3) audio.adjEqMid(1);
-            if (soundCursor == 4) audio.adjEqHigh(1);
+            if (soundCursor == 0) { audio.adjBgmVolume(1); changed = true; }
+            if (soundCursor == 1) { audio.adjSfxVolume(1); changed = true; }
+            if (soundCursor == 2) { audio.adjEqLow(1); changed = true; }
+            if (soundCursor == 3) { audio.adjEqMid(1); changed = true; }
+            if (soundCursor == 4) { audio.adjEqHigh(1); changed = true; }
         }
+        if (changed) storeSettings();   // 音量/EQ 改动立即持久化
         upWas=mk.up; downWas=mk.down; escWas=mk.esc; enterWas=mk.enter;
         leftWas=leftNow; rightWas=rightNow;
     }
@@ -794,6 +1746,12 @@ private:
             if (px < 10) px = 10;
             if (py < 10) py = 10;
             if (py > WIN_HEIGHT - 10) py = WIN_HEIGHT - 10;
+            // Gate scene: the closed door blocks the plane; once it opens,
+            // the plane may fly right into the doorway
+            if (ch2Flow == C2_GATE) {
+                double maxGateX = (gateScene.isOpen() || gateScene.doorOpen > 0.5) ? 700.0 : 560.0;
+                if (px > maxGateX) px = maxGateX;
+            }
 
             int noseX = px + player->getNoseOffset();
             // Energy wall only during combat (after auto-spawn begins)
@@ -804,9 +1762,9 @@ private:
 
             player->setX(px); player->setY(py);
 
-            // TrainingPlane shooting (Chapter 1 original fire rate)
+            // Shooting (disabled during the gate scene)
             if (dmFireCooldown > 0) dmFireCooldown--;
-            if (shoot && dmFireCooldown <= 0) {
+            if (ch2Flow != C2_GATE && shoot && dmFireCooldown <= 0) {
                 int nGuns = player->getGunCount();
                 for (int g = 0; g < nGuns; ++g) {
                     int ox, oy;
@@ -818,180 +1776,72 @@ private:
             bulletMgr.update(alienMgr.all());
             bulletMgr.removeInactive();
 
-            // ==== Ch2 auto-spawn wave system ====
-            // Start after sphere boss finishes all animations (DONE state)
-            if (autoSpawnPhase == 0 && sphereBossActive && sphereBoss.getState() == Ch2SphereBoss::DONE) {
-                autoSpawnPhase = 1; autoSpawnQueued = 3; autoSpawnTimer = 0;
-                autoSpawnScoreBase = score;  // record baseline for kill counting
-                autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
+            // ==== Ch2 scripted flow state machine ====
+            switch (ch2Flow) {
+                case C2_GATE:     updateCh2Gate(); break;
+                case C2_CORRIDOR: updateCh2Corridor(); break;
+                case C2_SPHERE:   updateCh2Sphere(); break;
+                case C2_CHASE:    updateCh2Chase(keys); break;
+                case C2_LAB:      updateCh2Lab(); break;
+                case C2_BOSS:     updateCh2Boss(); break;
+                case C2_ENDED:    updateCh2Ended(keys); break;
             }
-            // Spawn pump: processes any queued aliens (initial waves + escape replacements + reinforcements)
-            if (autoSpawnQueued > 0) {
-                if (autoSpawnTimer > 0) autoSpawnTimer--;
-                if (autoSpawnTimer <= 0) {
-                    ch2AlienMgr.forceSpawn();
-                    autoSpawnQueued--;
-                    autoSpawnTimer = 12; // 0.2s = 12 frames
-                }
-                // Auto-transition for waves 1,2 when initial batch fully spawned
-                if (autoSpawnQueued <= 0 && (autoSpawnPhase == 1 || autoSpawnPhase == 3))
-                    autoSpawnPhase++;
-            }
-            // Unified escape detection (fight phases 2,4,5): alive delta not from kills = escaped
-            if (autoSpawnPhase == 2 || autoSpawnPhase == 4 || autoSpawnPhase == 5) {
-                if (autoSpawnQueued <= 0) {
-                    int alive = ch2AlienMgr.countLiving();
-                    int kills = score - autoSpawnScoreBase;
-                    int aliveLost = autoSpawnAliveLast - alive;
-                    int killsGained = kills - autoSpawnKillsLast;
-                    int escaped = aliveLost - killsGained;
-                    if (escaped > 0) { autoSpawnQueued += escaped; autoSpawnTimer = 12; }
-                    autoSpawnAliveLast = alive + autoSpawnQueued;
-                    autoSpawnKillsLast = kills;
-                }
-            }
-            // Wave1→Wave2 transition: field empty + score ≥ 3
-            if (autoSpawnPhase == 2 && autoSpawnQueued <= 0) {
-                if (ch2AlienMgr.countLiving() == 0 && (score - autoSpawnScoreBase) >= 3) {
-                    autoSpawnPhase = 3; autoSpawnQueued = 5; autoSpawnTimer = 12;
-                }
-            }
-            // Wave2→Wave3 transition: field empty + score ≥ 8
-            if (autoSpawnPhase == 4 && autoSpawnQueued <= 0) {
-                if (ch2AlienMgr.countLiving() == 0 && (score - autoSpawnScoreBase) >= 8) {
-                    autoSpawnPhase = 5; autoSpawnQueued = 5; autoSpawnTimer = 12;
-                    autoSpawnWave3Reinf = 0;
-                }
-            }
-            // Wave 3: reinforcement + danmaku gate (phase 5)
-            if (autoSpawnPhase == 5 && autoSpawnQueued <= 0) {
-                int alive = ch2AlienMgr.countLiving();
-                int kills = score - autoSpawnScoreBase - 8;  // kills within wave3 only
-                // Reinforcement: every 3 wave3 kills, spawn 3 more (up to 4 rounds)
-                while (autoSpawnWave3Reinf < 4 && kills >= 3 * (autoSpawnWave3Reinf + 1)) {
-                    autoSpawnQueued += 3; autoSpawnWave3Reinf++;
-                }
-                // Danmaku gate: 4 reinf rounds done + field clear + no pending spawns
-                if (autoSpawnWave3Reinf >= 4 && alive == 0 && autoSpawnQueued <= 0) {
-                    dmMgr.spawnEnemy();
-                    autoSpawnPhase = 6;
-                }
-            }
-            player->updateInvFrames();
-            ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr, playerHitCount);
-            dmMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr, playerHitCount);
-            if (ch2GameOver) gameOver = true;
 
-            // Sphere boss update + scroll sync (only during ENTERING) + bg speed + bullet collision
-            if (sphereBossActive) {
-                if (sphereBoss.getState() == Ch2SphereBoss::ENTERING)
-                    sphereBoss.syncScreenPos(sideBg->getScrollX());
-                sphereBoss.update();
-                double ts = sphereBoss.getBgTargetSpeed();
-                if (ts >= 0 && sideBg) sideBg->setSpeed(ts);
+            // ==== Enemies + invincibility (combat flows only) ====
+            if (ch2Flow == C2_CHASE || ch2Flow == C2_BOSS) {
+                player->updateInvFrames();
+                ch2AlienMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr, playerHitCount);
+                dmMgr.update(bulletMgr, particleMgr, audio, score, *player, floatingTextMgr, playerHitCount);
+                if (ch2GameOver) gameOver = true;
+            } else {
+                player->updateInvFrames();
             }
-            if (sphereBossActive && sphereBoss.getState() == Ch2SphereBoss::FIGHT) {
-                for (auto& b : bulletMgr.all()) {
-                    if (!b.active || !b.canDamage) continue;
-                    double dx = b.x - sphereBoss.getCx();
-                    double dy = b.y - sphereBoss.getCy();
-                    if (dx*dx + dy*dy < sphereBoss.getRadius() * sphereBoss.getRadius()) {
-                        b.active = false;
-                        sphereBoss.takeDamage(1);
-                        sphereBoss.popDiamonds(1);
-                        particleMgr.spawnExplosion(b.x, b.y, 2);
-                    }
+
+            // ==== NightElf white energy (post-upgrade) ====
+            if (player == &nightElf) {
+                nightElf.setTripleFire(nightElfEnergy.isTripleActive());
+                nightElfEnergy.update(playerHitCount);
+                if (nightElfEnergy.justEnteredTriple()) {
+                    audio.sndTripleOn();
+                    floatingTextMgr.spawn((float)player->getX(), (float)(player->getY() - 26),
+                                          "TRIPLE FIRE!", 255, 255, 255);
+                    floatingTextMgr.spawn((float)player->getX() + 1, (float)(player->getY() - 27),
+                                          "TRIPLE FIRE!", 0, 0, 0);
+                }
+                if (nightElfEnergy.isTripleActive()) {
+                    int tt = nightElfEnergy.getTripleTimer();
+                    if (tt > 0 && tt <= NightElfEnergy::COUNTDOWN_START && tt % 30 == 0)
+                        audio.sndTripleCountdown();
                 }
             }
 
-            // ==== Pulse energy / skill orb / Shift input ====
+            // ==== Shift input + pulse release (any flow, unlocked only) ====
             bool shiftNow = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
             shiftJustPressed = (shiftNow && !shiftWas);
             shiftWas = shiftNow;
-
-            // Energy fill from bullet hits this frame
-            pulseSystem.addEnergy(playerHitCount);
-            playerHitCount = 0;
-
-            // Skill orb: spawn on first danmaku defeat (after defeat animation ends)
-            if (!pulseOrbDropped && !pulseSystem.unlocked) {
-                for (const auto& de : dmMgr.getEnemies()) {
-                    if (de.defeated && de.defeatTimer == 1) { // last frame of defeat animation
-                        skillOrb.spawn(de.x, de.y);
-                        pulseOrbDropped = true;
-                        break;
-                    }
-                }
-            }
-
-            // Skill orb: update + bullet collision (shield break after 18 hits)
-            if (skillOrb.isActive()) {
-                skillOrb.update();
-                if (skillOrb.state == Ch2SkillOrb::FLOATING) {
-                    for (auto& b : bulletMgr.all()) {
-                        if (!b.active || !b.canDamage) continue;
-                        double dx = b.x - skillOrb.x, dy = b.y - skillOrb.y;
-                        double hitR = skillOrb.radius + 5.0;
-                        if (dx*dx + dy*dy < hitR*hitR) {
-                            b.active = false; b.canDamage = false;
-                            skillOrb.registerHit(particleMgr, audio);
-                            break; // one hit per frame
-                        }
-                    }
-                }
-                // Orb absorption: hold Shift near core for 5 sec → fill energy bar
-                // Release Shift during absorption → energy rapidly drains to 0 before retry
-                if (skillOrb.isCore() && !skillOrb.pulseUnlocked()) {
-                    double dx = skillOrb.x - player->getX();
-                    double dy = skillOrb.y - player->getY();
-                    bool nearPlayer = (dx*dx + dy*dy < 200.0*200.0);
-                    // Drain energy to 0 if player released Shift or moved away
-                    if (skillOrb.state == Ch2SkillOrb::ABSORBING && (!shiftNow || !nearPlayer) && !pulseSystem.isDraining()) {
-                        skillOrb.stopAbsorb();
-                        pulseSystem.startDrain();
-                    }
-                    // Start absorption: must be CORE, holding Shift, near player, energy at 0
-                    if (skillOrb.state == Ch2SkillOrb::CORE && shiftNow && nearPlayer && pulseSystem.canAbsorb()) {
-                        skillOrb.startAbsorb();
-                    }
-                    // Continuing absorption: each frame tick timer + fill energy
-                    if (skillOrb.state == Ch2SkillOrb::ABSORBING && shiftNow && nearPlayer) {
-                        skillOrb.tickAbsorb();
-                        if (skillOrb.absorbTimer % 10 == 0) pulseSystem.addAbsorbEnergy();
-                        for (int i = 0; i < 5; ++i) {
-                            double sx = skillOrb.x + (rand()%14-7);
-                            double sy = skillOrb.y + (rand()%14-7);
-                            double vx = (player->getX() - sx) * 0.05 + (rand()%40-20)/15.0;
-                            double vy = (player->getY() - sy) * 0.05 + (rand()%40-20)/15.0;
-                            particleMgr.spawnWhiteParticle(sx, sy, vx, vy, 18 + rand() % 25);
-                        }
-                        if (skillOrb.pulseUnlocked()) {
-                            pulseSystem.unlocked = true;
-                            pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY; // snap to full
-                            autoSpawnQueued += 10;
-                        }
-                    }
-                    // Energy drain: -3 per frame until 0
-                    if (pulseSystem.isDraining()) {
-                        pulseSystem.drainTick();
-                    }
-                }
-            }
-
-            // Pulse release: single Shift press when energy full
             if (pulseSystem.unlocked && pulseSystem.isFull() && shiftJustPressed) {
                 pulseSystem.release((float)player->getX(), (float)player->getY(), particleMgr, audio);
             }
-            pulseSystem.update();
 
-            // Pulse wave collision: destroy all enemy bullets
+            // ==== Pulse energy from hits + pulse update + collisions ====
+            pulseSystem.addEnergy(playerHitCount);
+            playerHitCount = 0;
+            pulseSystem.update();
             pulseSystem.collideWithBullets(
                 const_cast<std::vector<Ch2EnemyBullet>&>(ch2AlienMgr.getBullets()), particleMgr);
             pulseSystem.collideWithBullets(
                 const_cast<std::vector<Ch2EnemyBullet>&>(dmMgr.getBullets()), particleMgr);
-            // Pulse wave collision: 1 damage per enemy per wave
             pulseSystem.collideWithAliens(ch2AlienMgr, particleMgr, audio, score, playerHitCount);
             pulseSystem.collideWithDanmaku(dmMgr, particleMgr, audio, score, playerHitCount);
+
+            // ==== Dialogue (shared update + character sounds) ====
+            updateDialogueCommon();
+
+            // ==== Scene-transition fade (gate → corridor) ====
+            if (ch2FadeTimer > 0) {
+                ch2FadeTimer++;
+                if (ch2FadeTimer >= 30) ch2FadeTimer = 0;
+            }
 
             floatingTextMgr.update();
             particleMgr.update();
@@ -1194,16 +2044,7 @@ private:
             }
             } // chapter 1 dialogue triggers
             if (!dialogueSys.isActive()) lastScore = score;
-            dialogueSys.update(false);  // no ENTER skip for dialogue
-            int ticks = dialogueSys.popTicks();
-            const std::string& spk = dialogueSys.currentSpeaker();
-            while (ticks-- > 0) {
-                if (spk.find("Ally") != std::string::npos) audio.sndAllyTalk();
-                else if (spk.find("Bryssa") != std::string::npos) audio.sndBryssaTalk();
-                else if (spk.find("Tower") != std::string::npos) audio.sndTowerTalk();
-                else if (spk.empty()) audio.sndSystemTalk();
-                else audio.sndTeletype();
-            }
+            updateDialogueCommon();
 
             // Ch1Boss movement
             if (phase == PHASE_BOSS_FIGHT || phase == PHASE_BOSS_PHASE2) {
@@ -1370,6 +2211,561 @@ private:
         }
     }
 
+    // ======== DIALOGUE COMMON (both chapters) ========
+    // Plays the dubbed voice clip for a text line (manifest lookup by CRC32).
+    // Returns true when a clip was found & started (missing/off → false).
+    bool playVoiceForText(const std::string& text) {
+        if (voiceLang >= 2) return false;   // OFF: keep letter pops, no voice
+        if (text.empty()) return false;
+        uint32_t h = AudioEngine::voiceCrc32(text.c_str());
+        std::map<uint32_t, std::string>::const_iterator it = voicePaths[voiceLang].find(h);
+        if (it == voicePaths[voiceLang].end()) return false;
+        audio.stopVoice();   // cut the previous line's clip (fast page-flipping)
+        return audio.playVoice(it->second.c_str());
+    }
+
+    void updateDialogueCommon() {
+        dialogueSys.update(false);  // no ENTER skip for in-game dialogue
+
+        // Voice hook: play the dubbed clip when the current line changes
+        if (dialogueSys.isActive()) {
+            const std::string& txt = dialogueSys.currentText();
+            uint32_t h = AudioEngine::voiceCrc32(txt.c_str());
+            if (h != lastDialogueHash) {
+                lastDialogueHash = h;
+                currentLineVoiced = playVoiceForText(txt);
+            }
+        } else {
+            lastDialogueHash = 0;
+            currentLineVoiced = false;
+        }
+
+        int ticks = dialogueSys.popTicks();
+        const std::string& spk = dialogueSys.currentSpeaker();
+        while (ticks-- > 0) {
+            if (currentLineVoiced) continue;   // real voice clip → skip synthetic blips
+            if (spk.find("Ally") != std::string::npos) audio.sndAllyTalk();
+            else if (spk.find("Bryssa") != std::string::npos) audio.sndBryssaTalk();
+            else if (spk.find("Tower") != std::string::npos) audio.sndTowerTalk();
+            else if (spk.find("Martha") != std::string::npos) audio.sndMarthaTalk();
+            else if (spk.find("Moonwell") != std::string::npos) audio.sndMoonwellTalk();
+            else if (spk.empty()) audio.sndSystemTalk();
+            else audio.sndTeletype();
+        }
+    }
+
+    // ======== CH2 FLOW: GATE (opening scene at Moonwell's vacuum door) ========
+    // 流程段落统一入口：切换段落时顺带标记自动存档（结局段不覆盖 AUTO 槽）
+    void enterCh2Flow(int f) {
+        if (ch2Flow == f) return;
+        ch2Flow = f;
+        if (f != C2_ENDED) pendingAutoSave = true;
+    }
+
+    void updateCh2Gate() {
+        if (!ch2GateInitDone) {
+            ch2GateInitDone = true;
+            pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY;   // HUD energy bar starts full
+            if (!dGateQueued) {
+                dGateQueued = true;
+                dialogueSys.queueDialogue("Bryssa", "Are we there? ... Why did we stop?");
+                dialogueSys.queueDialogue("Martha", "'Moonwell' ... no response at all.");
+                dialogueSys.queueDialogue("Bryssa", "So we can't get in?");
+                dialogueSys.queueDialogue("Martha", "Hold on. I'll have Ally try to link into their system.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "... ?");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Accessing Moonwell system.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Connecting. Please wait.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "All their devices are offline. But the facility still has power.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "... Preparing to emit a strong pulse signal. Forcefully waking up nearby hardware.");
+                dialogueSys.start();
+            }
+        }
+
+        // Dialogue finished → Ally starts the pulse sequence
+        if (gateScene.getStage() == Ch2GateScene::DIALOGUE && !dialogueSys.isActive()) {
+            gateScene.startPulsing();
+        }
+
+        // Pulse groups: each drains 1/5 of the full energy bar
+        int emitted = gateScene.update(player->getX(), player->getY(), audio);
+        if (emitted > 0) {
+            pulseSystem.energy -= Ch2PulseSystem::MAX_ENERGY / 5;
+            if (pulseSystem.energy < 0) pulseSystem.energy = 0;
+        }
+
+        // Scan starts → Moonwell AI speaks
+        if (gateScene.getStage() == Ch2GateScene::SCANNING && !dMoonwellQueued && !dialogueSys.isActive()) {
+            dMoonwellQueued = true;
+            dialogueSys.queueDialogue("Moonwell (ai)", "Scanning code. Verifying ID.");
+            dialogueSys.queueDialogue("Moonwell (ai)", "Flight code verified, 21395. Cargo confirmed. No obvious threats. You may proceed.");
+            dialogueSys.queueDialogue("Moonwell (ai)", "Welcome, Martha. Ally.");
+            dialogueSys.start();
+        }
+
+        // Door fully open → fly right through the doorway
+        if (gateScene.isOpen() && player->getX() > 640 && ch2FadeTimer <= 0) {
+            ch2FadeTimer = 1;   // start white fade (incremented in the common section)
+        }
+        if (ch2FadeTimer == 15) {
+            // Mid-fade: switch to the corridor scene
+            sideBg->reset();
+            player->setX(100); player->setY(WIN_HEIGHT / 2);
+            enterCh2Flow(C2_CORRIDOR);
+            ch2PhaseTimer = 0;
+            if (!dCorridorQueued) {
+                dCorridorQueued = true;
+                dialogueSys.queueDialogue("Martha", "We're in. The whole facility is silent.");
+                dialogueSys.queueDialogue("Bryssa", "It feels like no one has been here for years.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Main power is online. No life signs detected.");
+                dialogueSys.queueDialogue("Martha", "Stay sharp. We came here for the comms equipment.");
+                dialogueSys.start();
+            }
+        }
+    }
+
+    // ======== CH2 FLOW: CORRIDOR (silent flight, then the sphere appears) ========
+    void updateCh2Corridor() {
+        // Wait for the corridor dialogue to end, then a short beat
+        if (!dialogueSys.isActive()) {
+            ch2PhaseTimer++;
+        }
+        if (ch2PhaseTimer >= 150 && !sphereBossActive) {
+            sphereBoss.init(sideBg, player);
+            sphereBossActive = true;
+            sphereBoss.startEnteringAt(sideBg->getScrollX());  // appears ahead of current scroll
+            enterCh2Flow(C2_SPHERE);
+            ch2PhaseTimer = 0;
+        }
+    }
+
+    // ======== CH2 FLOW: SPHERE (blue sphere boss: enter → activate → fight → shatter) ========
+    void updateCh2Sphere() {
+        if (sphereBossActive) {
+            if (sphereBoss.getState() == Ch2SphereBoss::ENTERING)
+                sphereBoss.syncScreenPos(sideBg->getScrollX());
+            // First sighting dialogue
+            if (!dSphereIntroQueued && sphereBoss.getState() == Ch2SphereBoss::ENTERING
+                && !dialogueSys.isActive()) {
+                dSphereIntroQueued = true;
+                dialogueSys.queueDialogue("Bryssa", "Martha... what is THAT?");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Massive object ahead! Slowing down!");
+                dialogueSys.queueDialogue("Martha", "Brace yourselves.");
+                dialogueSys.start();
+            }
+            sphereBoss.update();
+            double ts = sphereBoss.getBgTargetSpeed();
+            if (ts >= 0 && sideBg) sideBg->setSpeed(ts);
+        }
+        // Activation dialogue (may arrive while intro dialogue still plays)
+        if (sphereBossActive && !dSphereActQueued
+            && (sphereBoss.getState() == Ch2SphereBoss::ACTIVATING || sphereBoss.getState() == Ch2SphereBoss::FIGHT)
+            && !dialogueSys.isActive()) {
+            dSphereActQueued = true;
+            dialogueSys.queueDialogue("Ally (ai copilot)", "Its surface is shifting. Blue to orange!");
+            dialogueSys.queueDialogue("Martha", "Orange means vulnerable. Open fire!");
+            dialogueSys.start();
+        }
+        // Bullets vs sphere (only in FIGHT)
+        if (sphereBossActive && sphereBoss.getState() == Ch2SphereBoss::FIGHT) {
+            for (auto& b : bulletMgr.all()) {
+                if (!b.active || !b.canDamage) continue;
+                double dx = b.x - sphereBoss.getCx();
+                double dy = b.y - sphereBoss.getCy();
+                if (dx*dx + dy*dy < sphereBoss.getRadius() * sphereBoss.getRadius()) {
+                    b.active = false;
+                    sphereBoss.takeDamage(1);
+                    sphereBoss.popDiamonds(1);
+                    particleMgr.spawnExplosion(b.x, b.y, 2);
+                }
+            }
+        }
+        // Shatter sequence finished → chase begins (auto-spawn wave 1)
+        if (sphereBossActive && sphereBoss.getState() == Ch2SphereBoss::DONE) {
+            if (autoSpawnPhase == 0) {
+                autoSpawnPhase = 1; autoSpawnQueued = 3; autoSpawnTimer = 0;
+                autoSpawnScoreBase = score;  // record baseline for kill counting
+                autoSpawnAliveLast = 0; autoSpawnKillsLast = 0;
+            }
+            enterCh2Flow(C2_CHASE);
+            if (!dChaseQueued) {
+                dChaseQueued = true;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Energy constructs! We'll have to fight through!");
+                dialogueSys.start();
+            }
+        }
+    }
+
+    // ======== CH2 FLOW: CHASE (auto-spawn waves → danmaku → pulse orb → lab) ========
+    void updateCh2Chase(const Uint8* keys) {
+        // ==== Auto-spawn wave system ====
+        // Spawn pump: processes any queued aliens (initial waves + escape replacements + reinforcements)
+        if (autoSpawnQueued > 0) {
+            if (autoSpawnTimer > 0) autoSpawnTimer--;
+            if (autoSpawnTimer <= 0) {
+                ch2AlienMgr.forceSpawn();
+                autoSpawnQueued--;
+                autoSpawnTimer = 12; // 0.2s = 12 frames
+            }
+            // Auto-transition for waves 1,2 when initial batch fully spawned
+            if (autoSpawnQueued <= 0 && (autoSpawnPhase == 1 || autoSpawnPhase == 3))
+                autoSpawnPhase++;
+        }
+        // Unified escape detection (fight phases 2,4,5): alive delta not from kills = escaped
+        if (autoSpawnPhase == 2 || autoSpawnPhase == 4 || autoSpawnPhase == 5) {
+            if (autoSpawnQueued <= 0) {
+                int alive = ch2AlienMgr.countLiving();
+                int kills = score - autoSpawnScoreBase;
+                int aliveLost = autoSpawnAliveLast - alive;
+                int killsGained = kills - autoSpawnKillsLast;
+                int escaped = aliveLost - killsGained;
+                if (escaped > 0) { autoSpawnQueued += escaped; autoSpawnTimer = 12; }
+                autoSpawnAliveLast = alive + autoSpawnQueued;
+                autoSpawnKillsLast = kills;
+            }
+        }
+        // Wave1→Wave2 transition: field empty + score ≥ 3
+        if (autoSpawnPhase == 2 && autoSpawnQueued <= 0) {
+            if (ch2AlienMgr.countLiving() == 0 && (score - autoSpawnScoreBase) >= 3) {
+                autoSpawnPhase = 3; autoSpawnQueued = 5; autoSpawnTimer = 12;
+            }
+        }
+        // Wave2→Wave3 transition: field empty + score ≥ 8
+        if (autoSpawnPhase == 4 && autoSpawnQueued <= 0) {
+            if (ch2AlienMgr.countLiving() == 0 && (score - autoSpawnScoreBase) >= 8) {
+                autoSpawnPhase = 5; autoSpawnQueued = 5; autoSpawnTimer = 12;
+                autoSpawnWave3Reinf = 0;
+            }
+        }
+        // Wave 3: reinforcement + danmaku gate (phase 5)
+        if (autoSpawnPhase == 5 && autoSpawnQueued <= 0) {
+            int alive = ch2AlienMgr.countLiving();
+            int kills = score - autoSpawnScoreBase - 8;  // kills within wave3 only
+            // Reinforcement: every 3 wave3 kills, spawn 3 more (up to 4 rounds)
+            while (autoSpawnWave3Reinf < 4 && kills >= 3 * (autoSpawnWave3Reinf + 1)) {
+                autoSpawnQueued += 3; autoSpawnWave3Reinf++;
+            }
+            // Danmaku gate: 4 reinf rounds done + field clear + no pending spawns
+            if (autoSpawnWave3Reinf >= 4 && alive == 0 && autoSpawnQueued <= 0) {
+                dmMgr.spawnEnemy();
+                autoSpawnPhase = 6;
+            }
+        }
+
+        // ==== Shift input (orb absorption uses it; release handled in common) ====
+        bool shiftNow = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
+
+        // Skill orb: spawn on first danmaku defeat (after defeat animation ends)
+        if (!pulseOrbDropped && !pulseSystem.unlocked) {
+            for (const auto& de : dmMgr.getEnemies()) {
+                if (de.defeated && de.defeatTimer == 1) { // last frame of defeat animation
+                    skillOrb.spawn(de.x, de.y);
+                    pulseOrbDropped = true;
+                    break;
+                }
+            }
+        }
+        // Orb drop dialogue
+        if (pulseOrbDropped && !dOrbQueued && !dialogueSys.isActive()) {
+            dOrbQueued = true;
+            dialogueSys.queueDialogue("Ally (ai copilot)", "That one dropped something! Break the shell, grab the core!");
+            dialogueSys.start();
+        }
+
+        // Skill orb: update + bullet collision (shield break after 18 hits)
+        if (skillOrb.isActive()) {
+            skillOrb.update();
+            if (skillOrb.state == Ch2SkillOrb::FLOATING) {
+                for (auto& b : bulletMgr.all()) {
+                    if (!b.active || !b.canDamage) continue;
+                    double dx = b.x - skillOrb.x, dy = b.y - skillOrb.y;
+                    double hitR = skillOrb.radius + 5.0;
+                    if (dx*dx + dy*dy < hitR*hitR) {
+                        b.active = false; b.canDamage = false;
+                        skillOrb.registerHit(particleMgr, audio);
+                        break; // one hit per frame
+                    }
+                }
+            }
+            // Orb absorption: hold Shift near core for 5 sec → fill energy bar
+            // Release Shift during absorption → energy rapidly drains to 0 before retry
+            if (skillOrb.isCore() && !skillOrb.pulseUnlocked()) {
+                double dx = skillOrb.x - player->getX();
+                double dy = skillOrb.y - player->getY();
+                bool nearPlayer = (dx*dx + dy*dy < 200.0*200.0);
+                // Drain energy to 0 if player released Shift or moved away
+                if (skillOrb.state == Ch2SkillOrb::ABSORBING && (!shiftNow || !nearPlayer) && !pulseSystem.isDraining()) {
+                    skillOrb.stopAbsorb();
+                    pulseSystem.startDrain();
+                }
+                // Start absorption: must be CORE, holding Shift, near player, energy at 0
+                if (skillOrb.state == Ch2SkillOrb::CORE && shiftNow && nearPlayer && pulseSystem.canAbsorb()) {
+                    skillOrb.startAbsorb();
+                }
+                // Continuing absorption: each frame tick timer + fill energy
+                if (skillOrb.state == Ch2SkillOrb::ABSORBING && shiftNow && nearPlayer) {
+                    skillOrb.tickAbsorb();
+                    if (skillOrb.absorbTimer % 10 == 0) pulseSystem.addAbsorbEnergy();
+                    for (int i = 0; i < 5; ++i) {
+                        double sx = skillOrb.x + (rand()%14-7);
+                        double sy = skillOrb.y + (rand()%14-7);
+                        double vx = (player->getX() - sx) * 0.05 + (rand()%40-20)/15.0;
+                        double vy = (player->getY() - sy) * 0.05 + (rand()%40-20)/15.0;
+                        particleMgr.spawnWhiteParticle(sx, sy, vx, vy, 18 + rand() % 25);
+                    }
+                    if (skillOrb.pulseUnlocked()) {
+                        pulseSystem.unlocked = true;
+                        pulseSystem.energy = Ch2PulseSystem::MAX_ENERGY; // snap to full
+                        autoSpawnQueued += 10;
+                    }
+                }
+                // Energy drain: -3 per frame until 0
+                if (pulseSystem.isDraining()) {
+                    pulseSystem.drainTick();
+                }
+            }
+        }
+
+        // Pulse unlock dialogue
+        if (pulseSystem.unlocked && !dPulseQueued && !dialogueSys.isActive()) {
+            dPulseQueued = true;
+            dialogueSys.queueDialogue("Ally (ai copilot)", "Pulse skill online! Full bar + SHIFT to release.");
+            dialogueSys.start();
+        }
+
+        // ==== Transition to the central lab ====
+        // Pulse unlocked + waves done + field clear → fly into the research center
+        bool danmakuGone = true;
+        for (const auto& de : dmMgr.getEnemies())
+            if (de.active || de.defeated) { danmakuGone = false; break; }
+        if (pulseSystem.unlocked && autoSpawnPhase == 6
+            && ch2AlienMgr.countLiving() == 0 && danmakuGone
+            && !dialogueSys.isActive()) {
+            ch2PhaseTimer++;
+            if (ch2PhaseTimer >= 120) {
+                enterCh2Flow(C2_LAB);
+                ch2PhaseTimer = 0;
+                ch2LabInitDone = false;
+                floatingTextMgr.spawn((float)CENTER_X + 1, 160.0f, "CENTRAL LAB", 0, 0, 0);
+                floatingTextMgr.spawn((float)CENTER_X, 159.0f, "CENTRAL LAB", 255, 255, 255);
+            }
+        } else {
+            ch2PhaseTimer = 0;
+        }
+    }
+
+    // ======== CH2 FLOW: LAB (NightElf prototype → plane upgrade) ========
+    void updateCh2Lab() {
+        if (!ch2LabInitDone) {
+            ch2LabInitDone = true;
+            labUpgradeState = 0; labUpgradeTimer = 0;
+            autoSpawnPhase = 0;              // energy wall off inside the lab
+            if (sideBg) sideBg->setSpeed(0); // corridor comes to a stop
+            labScene.reset();
+            if (!dLabQueued) {
+                dLabQueued = true;
+                dialogueSys.queueDialogue("Bryssa", "Look! The center of the lab...");
+                dialogueSys.queueDialogue("Martha", "A fighter. A real one.");
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Prototype identified: NightElf. Touch it to transfer control.");
+                dialogueSys.start();
+            }
+        }
+
+        // Park the NightElf prototype on its pedestal (until the player takes it)
+        if (labUpgradeState == 0) {
+            nightElf.setX(Ch2LabScene::PARK_X);
+            nightElf.setY(Ch2LabScene::PARK_Y);
+        }
+        labScene.update();
+
+        if (labUpgradeState == 0) {
+            // Player flies to touch the prototype
+            double dx = player->getX() - Ch2LabScene::PARK_X;
+            double dy = player->getY() - Ch2LabScene::PARK_Y;
+            if (dx*dx + dy*dy < 80.0 * 80.0) {
+                labUpgradeState = 1;
+                labUpgradeTimer = 0;
+            }
+        } else if (labUpgradeState == 1) {
+            // Upgrade animation: white particles converge on the prototype
+            labUpgradeTimer++;
+            if (labUpgradeTimer % 3 == 0) {
+                double angle = (rand() % 6283) / 1000.0;
+                double dist = 40 + rand() % 90;
+                double sx = Ch2LabScene::PARK_X + std::cos(angle) * dist;
+                double sy = Ch2LabScene::PARK_Y + std::sin(angle) * dist * 0.6;
+                particleMgr.spawnWhiteParticle(sx, sy,
+                    (Ch2LabScene::PARK_X - sx) * 0.06, (Ch2LabScene::PARK_Y - sy) * 0.06,
+                    15 + rand() % 15);
+            }
+            if (labUpgradeTimer >= 60) {
+                // Swap planes: trainer → NightElf (position carried over)
+                labUpgradeState = 2;
+                labUpgradeTimer = 0;
+                int tx = player->getX(), ty = player->getY();
+                player = &nightElf;
+                nightElf.setX(tx); nightElf.setY(ty);
+                nightElf.setTripleFire(false);
+                nightElfEnergy.reset();
+                tripleBeepCounter = 0;
+                floatingTextMgr.spawn((float)tx + 1, (float)(ty - 25), "NIGHTELF ONLINE", 0, 0, 0);
+                floatingTextMgr.spawn((float)tx, (float)(ty - 26), "NIGHTELF ONLINE", 255, 255, 255);
+                audio.sndTripleOn();
+                if (!dUpgradeQueued) {
+                    dUpgradeQueued = true;
+                    dialogueSys.queueDialogue("Ally (ai copilot)", "NightElf online. Welcome aboard, Martha.");
+                    dialogueSys.queueDialogue("Ally (ai copilot)", "Chain hits to charge white energy. Full bar = triple fire!");
+                    dialogueSys.start();
+                }
+            }
+        } else {
+            // Upgrade done → the Warden blocks the exit
+            labUpgradeTimer++;
+            if (!dBossWarnQueued && !dialogueSys.isActive()) {
+                dBossWarnQueued = true;
+                dialogueSys.queueDialogue("Ally (ai copilot)", "Massive energy signature! It's blocking the exit!");
+                dialogueSys.queueDialogue("Martha", "Then we go through it.");
+                dialogueSys.start();
+                audio.sndBossEntrance();
+                wardenBoss.startEntering();
+                autoSpawnPhase = 6;   // energy wall back on
+                enterCh2Flow(C2_BOSS);
+            }
+        }
+    }
+
+    // ======== CH2 FLOW: BOSS (MOONWELL WARDEN fight) ========
+    void updateCh2Boss() {
+        // Minion summons from the boss
+        if (wardenBoss.wantsMinion()) {
+            wardenBoss.clearMinionRequest();
+            if (ch2AlienMgr.countLiving() < 2) ch2AlienMgr.forceSpawn();
+        }
+
+        wardenBoss.update(*player, ch2PlayerHP, ch2GameOver, particleMgr, audio, floatingTextMgr);
+        if (ch2GameOver) gameOver = true;
+
+        Ch2WardenBoss::State bs = wardenBoss.getState();
+
+        // Player bullets vs boss bullets
+        for (auto& b : bulletMgr.all()) {
+            if (!b.active || !b.canDamage) continue;
+            for (auto& eb : wardenBoss.bullets) {
+                if (!eb.active) continue;
+                if (std::abs(b.x - eb.x) < 10 && std::abs(b.y - eb.y) < 10) {
+                    b.active = false; b.canDamage = false; eb.hp--;
+                    if (eb.hp <= 0) { eb.active = false; particleMgr.spawnExplosion(eb.x, eb.y, 4); audio.sndCrystalCrush(); }
+                    break;
+                }
+            }
+        }
+
+        // Player bullets vs boss body
+        if (bs == Ch2WardenBoss::FIGHT || bs == Ch2WardenBoss::ENRAGED) {
+            for (auto& b : bulletMgr.all()) {
+                if (!b.active || !b.canDamage) continue;
+                double dx = b.x - wardenBoss.getX(), dy = b.y - wardenBoss.getY();
+                if (dx*dx + dy*dy < wardenBoss.getRadius() * wardenBoss.getRadius()) {
+                    b.active = false; b.canDamage = false;
+                    wardenBoss.takeDamage(1);
+                    playerHitCount++;
+                    audio.sndBossHit();
+                    particleMgr.spawnExplosion(b.x, b.y, 4);
+                }
+            }
+        }
+
+        // Pulse vs boss bullets + boss body
+        pulseSystem.collideWithBullets(wardenBoss.bullets, particleMgr);
+        for (auto& w : pulseSystem.waves) {
+            if (!w.active) continue;
+            if (wardenBoss.lastHitByPulse == w.id) continue;
+            if (bs != Ch2WardenBoss::FIGHT && bs != Ch2WardenBoss::ENRAGED) continue;
+            double dx = wardenBoss.getX() - w.x, dy = wardenBoss.getY() - w.y;
+            if (dx*dx + dy*dy < (w.radius + wardenBoss.getRadius()) * (w.radius + wardenBoss.getRadius())) {
+                wardenBoss.lastHitByPulse = w.id;
+                wardenBoss.takeDamage(1);
+                playerHitCount++;
+                particleMgr.spawnExplosion(wardenBoss.getX(), wardenBoss.getY(), 4);
+                audio.sndShockwaveHit();
+            }
+        }
+
+        // Enrage dialogue
+        if (bs == Ch2WardenBoss::ENRAGED && !dBossEnrageQueued && !dialogueSys.isActive()) {
+            dBossEnrageQueued = true;
+            dialogueSys.queueDialogue("Ally (ai copilot)", "It's enraged! Watch the patterns!");
+            dialogueSys.start();
+        }
+
+        // Boss destroyed → clear the field and roll the epilogue narration
+        if (wardenBoss.isDefeated() && !ch2EpilogueStarted) {
+            ch2EpilogueStarted = true;
+            enterCh2Flow(C2_ENDED);   // epilogue narration runs, then mission complete
+            ch2AlienMgr.clearAll();
+            dmMgr.clearAll();
+            wardenBoss.clearBullets();
+            if (sideBg) sideBg->setSpeed(0);
+            startCh2Epilogue();
+        }
+    }
+
+    // ======== CH2 FLOW: ENDED (epilogue narration → mission complete menu) ========
+    void updateCh2Ended(const Uint8* keys) {
+        if (inNarration) return;   // epilogue narration is running (blocking)
+
+        if (!missionComplete) {
+            missionComplete = true;
+            defeatFadeTimer = 0;
+            if (isNormalPlay) {
+                int cur = chapterMgr.getCurrentIndex();
+                if (cur < 4 && !chapterMgr.isUnlocked(cur + 1))
+                    chapterMgr.unlockChapter(cur + 1);
+            }
+        }
+        defeatFadeTimer++;
+
+        // Mission complete menu: NEXT CHAPTER / BACK TO MAIN MENU
+        static bool upWasM2 = false, downWasM2 = false, enterWasM2 = false;
+        bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
+        bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+        bool enterNow = keys[SDL_SCANCODE_RETURN];
+        if (upNow && !upWasM2 && mcMenuSelection > 0) mcMenuSelection--;
+        if (downNow && !downWasM2 && mcMenuSelection < 1) mcMenuSelection++;
+        if (enterNow && !enterWasM2) {
+            if (mcMenuSelection == 0) {
+                int cur = chapterMgr.getCurrentIndex();
+                if (cur < 4) {
+                    chapterMgr.selectChapter(cur + 1);
+                    resetGame();
+                    atStartScreen = false;
+                    isNormalPlay = true;
+                    alienMgr.applyChapterConfig(chapterMgr.getConfig());
+                    bulletMgr.updateParams(0);
+                    shockwaveMgr.updateParams(0);
+                    startChapterNarration();
+                    pendingAutoSave = true;      // 新章节起点写入 AUTO 槽
+                } else {
+                    resetGame(); atStartScreen = true;
+                }
+            } else {
+                resetGame(); atStartScreen = true;
+            }
+        }
+        upWasM2 = upNow; downWasM2 = downNow; enterWasM2 = enterNow;
+    }
+
+    // ======== CH2 EPILOGUE (blocking narration after the Warden falls) ========
+    void startCh2Epilogue() {
+        narration.reset();
+        lastNarrationPage = -1;
+        narration.queue("The Warden falls.\nThe lab falls silent.");
+        narration.queue("The long-range comms unit is found intact.\nBryssa loads it into the trainer's hold.");
+        narration.queue("Martha takes one last look at Moonwell.\nThe engines roar to life.");
+        narration.queue("Home. The \"Life\" base is waiting.");
+        narration.start();
+        inNarration = true;
+    }
+
     void updateBossDefeat(const Uint8* keys) {
         bossDefeatTimer++;
         particleMgr.update();
@@ -1466,6 +2862,7 @@ private:
                         bulletMgr.updateParams(0);
                         shockwaveMgr.updateParams(0);
                         startChapterNarration();
+                        pendingAutoSave = true;      // 新章节起点写入 AUTO 槽
                     } else {
                         resetGame(); atStartScreen = true;
                     }
@@ -1494,7 +2891,14 @@ private:
 
         if (!gameOver) {
             if (isSide && sideBg) {
-                sideBg->draw(renderer.get());
+                if (ch2Flow == C2_GATE) {
+                    // Gate scene: full-screen starfield + vacuum door
+                    if (background) background->drawStarsFullscreen(renderer.get());
+                    gateScene.drawDoor(renderer.get());
+                } else {
+                    sideBg->draw(renderer.get());
+                    if (ch2Flow == C2_LAB) labScene.draw(renderer.get());
+                }
             } else if (background) {
                 background->drawBackground(renderer.get());
                 background->drawBase(renderer.get());
@@ -1511,13 +2915,22 @@ private:
             }
             if (isSide) {
                 if (sphereBossActive) sphereBoss.draw(renderer.get());
+                if (ch2Flow == C2_BOSS || (ch2Flow == C2_ENDED && !wardenBoss.isDefeated()))
+                    wardenBoss.draw(renderer.get());
                 bulletMgr.draw(renderer.get());
                 player->draw(renderer.get());
+                if (ch2Flow == C2_GATE) {
+                    gateScene.drawScanBeam(renderer.get(), player->getX(), player->getY());
+                    gateScene.drawRings(renderer.get(), player->getX(), player->getY());
+                }
                 drawWallFlash();
                 ch2AlienMgr.drawEnemy(renderer.get());
                 ch2AlienMgr.drawBullets(renderer.get());
                 dmMgr.drawEnemy(renderer.get());
                 dmMgr.drawBullets(renderer.get());
+                if (ch2Flow == C2_BOSS) wardenBoss.drawBullets(renderer.get());
+                // Parked NightElf prototype on its pedestal (before the upgrade)
+                if (ch2Flow == C2_LAB && labUpgradeState == 0) nightElf.draw(renderer.get());
                 // Pulse waves on top of enemies
                 pulseSystem.draw(renderer.get());
                 skillOrb.draw(renderer.get());
@@ -1527,7 +2940,32 @@ private:
                 float eFill = pulseSystem.getFill();
                 HUDBase::drawEnergyBar(renderer.get(), WIN_WIDTH - 10, 46, 10*14, 6,
                     eFill, pulseSystem.isFull());
+                // NightElf white energy bar (under the green bar, post-upgrade)
+                if (player == &nightElf) {
+                    int wMode = nightElfEnergy.isTripleActive() ? 2
+                              : (nightElfEnergy.isCharging() ? 0 : 1);
+                    HUDBase::drawEnergyBarWhite(renderer.get(), WIN_WIDTH - 10, 54, 10*14, 6,
+                        nightElfEnergy.getFill(), wMode);
+                }
+                // Sphere boss HP bar (above the sphere, FIGHT only)
+                if (ch2Flow == C2_SPHERE && sphereBossActive
+                    && sphereBoss.getState() == Ch2SphereBoss::FIGHT) {
+                    HUDBase::drawBossBar(renderer.get(), font, "???",
+                        sphereBoss.getHp(), sphereBoss.getMaxHp(),
+                        (int)sphereBoss.getCx() - 100,
+                        (int)(sphereBoss.getCy() - sphereBoss.getRadius() - 30), 200, 10);
+                }
+                // Warden boss HP bar
+                if (ch2Flow == C2_BOSS) wardenBoss.drawHPBar(renderer.get(), font);
                 if (aimAssistOn) drawAimAssistSide();
+                // White scene-transition fade (gate → corridor)
+                if (ch2FadeTimer > 0 && ch2FadeTimer < 30) {
+                    double ft = ch2FadeTimer / 30.0;
+                    int fa = (int)(255.0 * std::sin(M_PI * ft));
+                    SDL_SetRenderDrawColor(renderer.get(), 255, 255, 255, (Uint8)fa);
+                    SDL_Rect fr = {0, 0, WIN_WIDTH, WIN_HEIGHT};
+                    SDL_RenderFillRect(renderer.get(), &fr);
+                }
             } else player->draw(renderer.get());
 
             // Floating texts
@@ -1723,6 +3161,18 @@ private:
             }
         }
 
+        // Check the Warden boss body (chapter boss fight)
+        if (ch2Flow == C2_BOSS &&
+            (wardenBoss.getState() == Ch2WardenBoss::FIGHT || wardenBoss.getState() == Ch2WardenBoss::ENRAGED)) {
+            double t = wardenBoss.getX() - px;
+            if (t > 0) {
+                double lateral = std::fabs(wardenBoss.getY() - py);
+                if (lateral < wardenBoss.getRadius() && t < bestT) {
+                    bestT = t; snapX = wardenBoss.getX(); snapY = wardenBoss.getY();
+                }
+            }
+        }
+
         player->aimAssist.update(bestT < 999.0);
         double drawX = (bestT < 999.0) ? snapX : aimX;
         double drawY = (bestT < 999.0) ? snapY : aimY;
@@ -1796,7 +3246,6 @@ private:
                 }
             }
         } else {
-            static bool pUpWas = false, pDownWas = false, pEnterWas = false, pLeftWas = false, pRightWas = false;
             bool upNow = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
             bool downNow = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
             bool leftNow = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
@@ -1810,12 +3259,14 @@ private:
             if (!pauseHistoryFocused) {
                 // Menu focused
                 if (upNow && !pUpWas && pauseMenuSelection > 0)     pauseMenuSelection--;
-                if (downNow && !pDownWas && pauseMenuSelection < 4) pauseMenuSelection++;
+                if (downNow && !pDownWas && pauseMenuSelection < 6) pauseMenuSelection++;
                 if (enterNow && !pEnterWas) {
                     if (pauseMenuSelection == 0)      { countdown = 3; countdownFrame = 0; }
-                    else if (pauseMenuSelection == 1) { resetGame(); paused = false; }
-                    else if (pauseMenuSelection == 2) { paused = false; atOptionScreen = true; optionFromPause = true; }
-                    else if (pauseMenuSelection == 3) { resetGame(); atStartScreen = true; paused = false; }
+                    else if (pauseMenuSelection == 1) { openSaveScreen(true); }
+                    else if (pauseMenuSelection == 2) { openLoadScreen(true); }
+                    else if (pauseMenuSelection == 3) { resetGame(); paused = false; pendingAutoSave = true; }
+                    else if (pauseMenuSelection == 4) { paused = false; atOptionScreen = true; optionFromPause = true; }
+                    else if (pauseMenuSelection == 5) { resetGame(); atStartScreen = true; paused = false; }
                     else                              running = false;
                 }
             } else {
@@ -1835,9 +3286,10 @@ private:
         // === Left half: menu ===
         bool menuFocus = !pauseHistoryFocused;
         font.drawString(r, "PAUSED", 50, 100, 3);
-        const char* items[5] = {"RESUME", "RESTART", "OPTIONS", "BACK TO MAIN MENU", "EXIT"};
-        const int MENU_Y0 = 160, GAP = 40;
-        for (int i = 0; i < 5; ++i) {
+        const char* items[7] = {"RESUME", "SAVE GAME", "LOAD GAME", "RESTART",
+                                "OPTIONS", "BACK TO MAIN MENU", "EXIT"};
+        const int MENU_Y0 = 150, GAP = 38;
+        for (int i = 0; i < 7; ++i) {
             int itemW = (int)strlen(items[i]) * 6 * 3;
             int itemX = 50;
             int itemY = MENU_Y0 + i * GAP;
@@ -2069,6 +3521,7 @@ private:
     // ======== NARRATION ========
     void startChapterNarration() {
         narration.reset();
+        lastNarrationPage = -1;   // first page will trigger its voice clip
         int ch = chapterMgr.getCurrentIndex();
         switch (ch) {
             case 0:
@@ -2126,7 +3579,17 @@ private:
         narration.update(enterNow);
         int cticks = narration.popTicks();
         while (cticks-- > 0) audio.sndTeletype();
-        if (!narration.isActive()) inNarration = false;
+        // Voice hook: play the dubbed clip when the page changes
+        int page = narration.getCurLine();
+        if (page >= 0 && page != lastNarrationPage) {
+            lastNarrationPage = page;
+            const std::string& raw = narration.currentRawText();
+            if (!raw.empty()) playVoiceForText(raw);
+        }
+        if (!narration.isActive()) {
+            if (lastNarrationPage >= 0) { lastNarrationPage = -1; audio.stopVoice(); }
+            inNarration = false;
+        }
         if (background) background->update();
         if (sideBg) sideBg->update();
     }

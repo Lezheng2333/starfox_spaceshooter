@@ -3,7 +3,7 @@
 ## 项目信息
 
 - **语言**：C++11, SDL2
-- **源码**：`v2.0.0/multiple code files/`（28 个头文件 + 1 个 main.cpp = 29 个文件）\
+- **源码**：`v2.0.0/multiple code files/`（33 个头文件 + 1 个 main.cpp = 34 个文件）\
   旧单文件存档：`v2.0.0/space_shooting ver1.2.20 single-file archive.cpp`
 - **编译命令**：
   ```bash
@@ -13,6 +13,12 @@
   ```bash
   cd "v2.0.0/multiple code files" && clang++ -std=c++11 -I/opt/homebrew/include -I/opt/homebrew/include/SDL2 \
     -D_THREAD_SAFE main.cpp -o shooter -L/opt/homebrew/lib -lSDL2
+  ```
+- **开发用运行参数**：
+  ```bash
+  ./shooter              # 正常游玩
+  ./shooter --test       # 主菜单显示隐藏的 TEST 入口（跳关/预设状态调试）
+  ./shooter --selftest   # 存档系统自检（无窗口，0=PASS；存档写 /tmp，不动玩家存档）
   ```
 - **SDL2 安装**：`brew install sdl2`
 - **GitHub 仓库**：`Lezheng2333/starfox_spaceshooter`
@@ -25,23 +31,45 @@
 ## 当前开发状态
 
 ### 当前焦点
-- **pulse技能已完成** — Ch2PulseSystem（30格能量条+单按Shift释放冲击波）+ Ch2SkillOrb（18边形护罩技能球→吸收→解锁）
-- **NightElf升级** — 下一步待实现。NightElf 飞机+NightElfEnergy 白色能量条已搁置，需在剧情节点激活
-- Ch2 当前使用 Ch2Trainer（横版训练机，单发，无技能），脉冲系统为全机通用
+- **第二章已完整贯通** — 七段流程状态机：门禁GATE→廊桥CORRIDOR→球体SPHERE→追逐CHASE→研究室LAB→Boss BOSS→结局ENDED
+- Ch2 组件全貌：门禁真空门/扫描演出（ch2_gate.h）、圆形研究室（ch2_lab.h）、章节Boss Warden（ch2_boss.h）、球体Boss、自动出敌、pulse技能、技能球、NightElf升级+白色能量条三炮模式
+- Ch2 飞机切换：门禁/廊桥/球体/追逐段用 Ch2Trainer，研究室触碰暗夜精灵号后切换 NightElf
+- **存档系统已上线** — 测试模式退役为隐藏入口（--test），主菜单改为 LOAD GAME；
+  暂停存档/读档回到存档瞬间同一帧 + AUTO 自动存档 + 存档界面 + 自由读档文件浏览器 + 设置持久化
+- **下一步：Chapter 3（敌人要塞）** — Druid 飞机激活、第三章敌人/Boss/剧情设计
 
 ### 开发路线
 ```
-✅ 球体Boss ✅ 自动出敌 ✅ pulse技能 → NightElf升级(暗夜精灵+能量条激活) → 门禁序列(扫描+解锁) → 章节Boss
+✅ 第二章全部主线：球体Boss ✅ 自动出敌 ✅ pulse技能 ✅ NightElf升级 ✅ 门禁序列 ✅ 章节Boss ✅ 剧情串联
+✅ 存档系统：暂停存档/读档回同一帧/AUTO 自动存档/自由读档/设置持久化（--selftest 全绿）
+→ Chapter 3：Druid激活 + 敌人要塞章节设计（第三章旁白目前为占位）
 ```
 
 ### 已知脆弱点（修改前必须理解上下文）
 - **Ch1 子弹横飞 Bug**：`addBullet()` 中 `Ch1Bullet.sideScroll` 必须显式设 `false`，否则垃圾值会随机触发 Ch2 弹道
 - **对话级联触发**：每个分数触发的 dialogue 区块内必须同步设置 `lastScore = score`，帧级 `lastScore` 更新仅在 `!dialogueSys.isActive()` 时执行
 - **Ch1 移动速度缩放**：`TrainingPlane::handleInput` 中的 y 钳制顺序必须在 x 钳制之后（先夹 y 再夹 x），否则影响 `getT()` 返回的子弹方向
+- **Ch2 流程状态机**：`ch2Flow`（Ch2Flow 枚举）在 `updateGameplay` 的 Ch2 分支中 switch 分发；
+  结局旁白触发时必须同步 `ch2Flow = C2_ENDED`，否则 MISSION COMPLETE 永不出现
+- **Ch2 门禁飞机活动范围**：门关闭时 x≤560，开门（doorOpen>0.5）后放宽至 x≤700，
+  玩家穿过 x=640 触发白色淡出转场进入廊桥
+- **存档字段顺序即字节顺序**：任何新增"会被存档的可变状态"必须同时
+  ①在对应类的 `visit()` 里按固定位置补上 ②改动 serializeAll 字段顺序/类型时把
+  `SAVE_FORMAT_VERSION` +1。游戏版本号（SAVE_GAME_VERSION）只作显示，不作废玩家存档
+- **私有成员也要能存档**：各类的 `visit()` 是成员模板（因此能访问 private/protected）；
+  指针成员（Ch1Boss.cfg / Ch2SphereBoss.bg / playerRef）一律不入档，读档后由 Game 重新绑定
+- **读档必须复位输入边沿**：`finishLoad()` 里把 upWas/downWas/enterWas/escWas/bkspWas/shiftWas
+  与 DialogueSystem/NarrationSystem 的 enterWas 全部置真，否则读档瞬间按住的键会跳过对话或误触发菜单
+- **进入存/读档界面必须走 `beginSaveLoadScreen()`**：它会清掉 atStartScreen/atChapterSelect 等
+  其它界面标志；直接改 atSaveLoadScreen 会让单帧分派继续停在旧界面
+- **读档后固定进暂停态**：`finishLoad()` 强制 `paused=true, countdown=-1`，
+  倒计时只能由玩家在暂停菜单选 RESUME 触发（需求：读档先看到存档那一帧，手动退菜单再继续）
+- **Ch2 流程段落切换统一走 `enterCh2Flow()`**：它负责在切换时标记 AUTO 自动存档；
+  直接赋值 `ch2Flow = ...` 会漏掉自动存档（TEST 预设入口除外）
 
 ## 代码规范
 
-- 多文件架构：27 个头文件（全部 `#pragma once`）+ 1 个 `main.cpp`
+- 多文件架构：33 个头文件（全部 `#pragma once`）+ 1 个 `main.cpp`
 - 每个文件对应一个系统/类，文件即文档
 - 全部实现内联在头文件中（单翻译单元编译，无 .cpp 对应文件除了 main.cpp）
 - OOP 设计：组合优于继承，静态方法替代虚函数
@@ -57,69 +85,77 @@
   aim_assist.h = AimAssist       player.h = Player + 全部4架子机
   bullets.h = BulletManager      chapter_manager.h = ChapterManager
   ui.h = UIRenderer + MenuStateMachine + MenuKeys
+  save_system.h = SaveArchive + SaveMeta + SaveSystem + FileBrowser + GameSettings（存档格式/IO/设置）
+  save_menu.h = SaveMenu（读档列表/存档列表/文件浏览器/确认框 UI）
   ch1/ = Ch1Shockwave/Alien/Boss/Background
-  ch2/ = Ch2Background + ShooterBase + Danmaku + Aliens + SphereBoss + SkillOrb + Pulse + HUD
-  game.h = Game类（含全部状态机+update/draw)    main.cpp = main()
+  ch2/ = Ch2Background + ShooterBase + Danmaku + Aliens + SphereBoss + SkillOrb + Pulse + HUD + Gate + Lab + WardenBoss
+  game.h = Game类（含全部状态机+update/draw+存档序列化)    main.cpp = main()
   ```
+- **存档序列化约定**：每个会被存档的类都实现 `template<class Ar> void visit(Ar& ar)`，
+  字段顺序即存档字节顺序；`Game::serializeAll()` 按固定顺序串起全部子系统
 
-## 完整文件结构（v1.2.21 多文件架构）
+## 完整文件结构（v1.2.23 多文件架构）
 
 ### 编译入口
 
 ```
-main.cpp            (36 lines)  #include 所有头文件 + main()
+main.cpp            (78 lines)  #include 所有头文件 + main()（--test / --selftest 参数解析）
 ```
 
-### 根目录: 共享基础 (17 files)
+### 根目录: 共享基础 (19 files)
 
 | 文件 | 行数 | 内容 |
 |------|------|------|
-| `types.h` | 143 | 全部 18 个 struct + 2 个 enum |
+| `types.h` | 207 | 全部 18 个 struct + 2 个 enum（每个 struct 内含存档 visit()） |
 | `constants.h` | 19 | WIN_WIDTH/WIN_HEIGHT/CENTER_X/HORIZON_Y + perspLeft/Right/Width |
 | `font.h` | 153 | Font — 5x7 位图字体渲染 |
 | `renderer.h` | 37 | Renderer — SDL 渲染器封装 |
-| `audio.h` | 342 | AudioEngine — 实时音频合成 + BGM + 全部 snd* 函数 |
+| `audio.h` | 485 | AudioEngine — 实时音频合成 + BGM + 全部 snd* 函数 |
 | `floating_text.h` | 38 | FloatingTextManager |
-| `dialogue.h` | 235 | DialogueHistory + DialogueSystem + drawTextLine |
-| `narration.h` | 135 | NarrationSystem — 中心开幕旁白 |
+| `dialogue.h` | 273 | DialogueHistory + DialogueSystem + drawTextLine |
+| `narration.h` | 157 | NarrationSystem — 中心开幕旁白 |
 | `particles.h` | 140 | ParticleManager — 粒子特效管理 |
-| `aim_assist.h` | 41 | AimAssist — 瞄准辅助组件 |
-| `player.h` | 280 | Player + TrainingPlane + Ch2Trainer + NightElf[DORMANT] + Druid[DORMANT] |
-| `bullets.h` | 186 | BulletManager — addBullet/addBulletSideScrollAt/update/draw |
+| `aim_assist.h` | 43 | AimAssist — 瞄准辅助组件 |
+| `player.h` | 299 | Player + TrainingPlane + Ch2Trainer + NightElf + Druid[DORMANT] |
+| `bullets.h` | 192 | BulletManager — addBullet/addBulletSideScrollAt/update/draw |
 | `chapter_manager.h` | 70 | ChapterManager — 章节配置/解锁/切换 |
 | `ui.h` | 185 | UIRenderer + MenuStateMachine + MenuKeys |
-| `game.h` | 2144 | Game 类 — 全部状态机 + 全部 update/draw 方法 |
+| `save_system.h` | 533 | SaveArchive（读写双端序列化）+ SaveMeta + SaveSystem（路径/CRC/文件 IO）+ FileBrowser + GameSettings |
+| `save_menu.h` | 274 | SaveMenu — 读档列表/存档列表/迷你文件浏览器/确认框/提示条 |
+| `game.h` | 3513 | Game 类 — 全部状态机 + 全部 update/draw + 存档序列化 + 存/读档界面接线 |
 
 ### ch1/ 子目录: Chapter 1 战斗系统 (4 files)
 
 | 文件 | 行数 | 内容 |
 |------|------|------|
-| `ch1_shockwave.h` | 191 | Ch1ShockwaveManager + ID 碰撞机制 |
-| `ch1_aliens.h` | 231 | Ch1AlienManager — 透视外星飞船管理 |
-| `ch1_boss.h` | 422 | Ch1Boss — TELAMONDO（二阶段+治疗波+吸收） |
-| `ch1_background.h` | 122 | Ch1Background — 星空+地平线+基地 |
+| `ch1_shockwave.h` | 199 | Ch1ShockwaveManager + ID 碰撞机制 |
+| `ch1_aliens.h` | 237 | Ch1AlienManager — 透视外星飞船管理 |
+| `ch1_boss.h` | 435 | Ch1Boss — TELAMONDO（二阶段+治疗波+吸收） |
+| `ch1_background.h` | 125 | Ch1Background — 星空+地平线+基地 |
 
-### ch2/ 子目录: Chapter 2 战斗系统 (8 files)
+### ch2/ 子目录: Chapter 2 战斗系统 (11 files)
 
 | 文件 | 行数 | 内容 |
 |------|------|------|
-| `ch2_background.h` | 293 | Ch2Background — 侧滚廊桥背景 |
-| `ch2_shooter_base.h` | 149 | Ch2ShooterBase + NightElfEnergy[DORMANT] |
-| `ch2_hud.h` | 39 | HUDBase — drawScore/drawHPHearts/drawEnergyBar |
-| `ch2_danmaku.h` | 217 | Ch2DanmakuManager — 螺旋弹幕敌人 |
-| `ch2_aliens.h` | 154 | Ch2AlienManager — 普敌管理（菱形造型，四边突袭） |
-| `ch2_sphere_boss.h` | 383 | Ch2SphereBoss — 六角密铺菱形球体，7 状态机 |
-| `ch2_skill_orb.h` | 201 | Ch2SkillOrb — 漂浮技能球 + 18边形护罩 + 吸收 |
-| `ch2_pulse.h` | 197 | Ch2PulseSystem — 绿色能量条 + Shift 单按释放冲击波 |
+| `ch2_background.h` | 312 | Ch2Background — 侧滚廊桥背景 |
+| `ch2_shooter_base.h` | 158 | Ch2ShooterBase + NightElfEnergy（白色能量条） |
+| `ch2_hud.h` | 86 | HUDBase — drawScore/drawHPHearts/drawEnergyBar/drawEnergyBarWhite/drawBossBar |
+| `ch2_danmaku.h` | 224 | Ch2DanmakuManager — 螺旋弹幕敌人 |
+| `ch2_aliens.h` | 168 | Ch2AlienManager — 普敌管理（菱形造型，四边突袭） |
+| `ch2_sphere_boss.h` | 424 | Ch2SphereBoss — 六角密铺菱形球体，7 状态机 |
+| `ch2_skill_orb.h` | 211 | Ch2SkillOrb — 漂浮技能球 + 18边形护罩 + 吸收 |
+| `ch2_pulse.h` | 203 | Ch2PulseSystem — 绿色能量条 + Shift 单按释放冲击波 |
+| `ch2_gate.h` | 325 | Ch2GateScene — 门禁场景（真空门+扫描+脉冲解锁+开门） |
+| `ch2_lab.h` | 108 | Ch2LabScene — 中央研究室（圆形房间+基座） |
+| `ch2_boss.h` | 360 | Ch2WardenBoss — 章节Boss MOONWELL WARDEN（4 状态机+弹幕） |
 
 ### 休眠资产 (grep `[DORMANT]` 查找)
 
 | 资产 | 文件 | 激活条件 |
 |------|------|------|
-| NightElf | player.h | 门禁序列完成后 player 指针切换 |
-| NightElfEnergy | ch2/shooter_base.h | NightElf 激活后联动 |
 | Druid | player.h | Chapter 3 开发时激活 |
 | setStartBgm() | audio.h | 开始画面专属 BGM 设计完成后 |
+| TEST 测试模式（updateTestScreen/drawTestScreen + 预设状态跳转） | game.h | 命令行 `./shooter --test`（主菜单才显示 TEST 项） |
 
 ### 关键设计决策
 
@@ -129,6 +165,35 @@ main.cpp            (36 lines)  #include 所有头文件 + main()
 - **Ch1 射击**：`addBullet(TrainingPlane&)` 依赖 `getT()` 做透视弹道
 - **Ch1 子弹横飞 Bug 根因**：`sideScroll` 未初始化，垃圾值随机触发 Ch2 弹道 — 修复在 `addBullet()` 中显式设 `sideScroll=false`
 - **碰撞 ID 机制**：Ch1Shockwave 用 `lastHitBySW == sw.id`，Ch2Pulse 用 `lastHitByPulse == w.id`，每波唯一，每敌人只受一次伤害
+- **Ch2 流程状态机**：`ch2Flow`（Ch2Flow 七段枚举）在 `updateGameplay` 的 Ch2 分支 switch 分发，
+  对话更新/脉冲释放/白色能量等共享逻辑放公共区；Boss 死亡时同步 `ch2Flow = C2_ENDED` 再触发结局旁白
+- **Ch2 球体Boss 入场**：正常流程用 `startEnteringAt(scrollX)`（世界坐标=当前滚动+1200），
+  测试模式用 `startEntering()`（依赖滚动从 0 开始）
+- **Ch2 章节Boss**：Ch2WardenBoss 独立类（ENTERING→FIGHT→ENRAGED→DYING），
+  弹幕三模式循环+召唤普敌增援；Boss 受击计入 playerHitCount（白/绿能量条联动）
+- **语音系统（VOICE OVER）**：旁白页/对话行切换时播放配音；文本→文件映射由
+  `voice/voice_manifest.txt`（`<lang> <crc32(英文原文)> <相对路径>`，启动时加载）提供，
+  文本改动自动映射新文件，缺失文件静默降级（对话保留合成电报音）；
+  旁白打字机字母弹出音效（sndTeletype）始终保留；`voiceLang` 三态
+  （0=中文默认/1=English/2=OFF 只留字母音效）在 OPTIONS 菜单循环切换；
+  语音生成管线 `tools/voice_pipeline.py`（collect 提取 game.h 台词+按章节归属
+  +校验中英翻译 → generate 按角色音色合成并生成 manifest，
+  `--chapters 1,2` 按章节过滤，edge-tts/piper/gpt-sovits 后端）
+- **语音资源现状**：第一+二章已生成（182 个 WAV，34MB），目录结构
+  `voice/<zh|en>/ch<N>/nar_XX.wav + dlg_<角色>_XX.wav`；
+  第三~五章占位旁白未生成（`generate --chapters 3,4,5` 可补）；
+  发布 .app 时需一并打包 voice/ 目录
+- **存档系统（Ver 1.2.23）**：暂停时把整帧状态按固定顺序序列化写盘（含飞行中的子弹/敌人/粒子/
+  对话打字进度/背景滚动），读档反序列化后强制 `paused=true`，因此重绘出的就是存档那一帧，
+  玩家在暂停菜单选 RESUME 才走 3-2-1 倒计时继续
+  - 每个状态类实现 `visit(Ar&)`（成员模板，可访问 private）；指针成员不入档，读档后重新绑定
+  - 文件结构：magic "SFSSAVE0" + 格式版本 + 游戏版本 + payload 长度 + CRC32 + payload；
+    payload 首部是 SaveMeta 摘要（章节/分数/血量/流程段落/时间），列表只读摘要
+  - 槽位：AUTO + SLOT 1-6；另可进入游戏内文件浏览器自由读档 / 另存为任意路径
+  - 自动存档点：每章开始 + Ch2 每次 `enterCh2Flow()` 段落切换（结局段除外）
+  - 存档目录 ./saves/，不可写回退 ~/Library/Application Support/StarFoxSpaceShooter/saves/，
+    环境变量 SFSS_SAVE_DIR 可强制指定（--selftest 用它写到 /tmp）
+  - 布局规则：改动 serializeAll 字段顺序/类型必须 +1 SAVE_FORMAT_VERSION（只按格式版本拒绝旧档）
 - **只移动不改逻辑**：重构全部是剪切粘贴，零行逻辑修改
 
 ## OOP 重构后检查清单
@@ -138,6 +203,8 @@ main.cpp            (36 lines)  #include 所有头文件 + main()
 2. 运行 `./shooter` 快速启动，确认不崩溃
 3. 逐项核对受影响的功能点（用 `grep -n` 查找所有调用方，确认每个调用点已更新）
 4. 全局搜索旧方法名/旧类名，确保无残留引用
+5. 涉及战斗/流程/存档的改动，跑 `./shooter --selftest`（4 个战斗场景的存档往返 +
+   菜单接线 + 跨章节读档 + 设置持久化，全部必须 PASS）
 
 ## 开发日志格式规范
 

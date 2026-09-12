@@ -136,5 +136,8 @@ public:
             [](const Ch1Particle& p){ return !p.active; }), particles.end());
     }
 
+    // 存档：全部存活粒子（含寿命/速度/颜色标记）
+    template <class Ar> void visit(Ar& ar) { ar.ioVecObj(particles); }
+
     std::vector<Ch1Particle>& all() { return particles; }
 };

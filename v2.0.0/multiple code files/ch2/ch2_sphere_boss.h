@@ -18,6 +18,11 @@ public:
         int activationOrder, shatterOrder;
         bool onSphere, activated;
         int colorState; // 0=blue 1=orange 2=white
+        template <class Ar> void visit(Ar& ar) {
+            ar.ioNum(relX); ar.ioNum(relY);
+            ar.ioNum(activationOrder); ar.ioNum(shatterOrder);
+            ar.ioBool(onSphere); ar.ioBool(activated); ar.ioNum(colorState);
+        }
     };
     struct SphereDebris {
         double x, y, vx, vy, rotAngle, rotSpeed;
@@ -25,6 +30,13 @@ public:
         double shakeDelay, shakePhase;
         double rushVx, rushVy;
         double floorY;     // per-debris landing Y for perspective floor scatter
+        template <class Ar> void visit(Ar& ar) {
+            ar.ioNum(x); ar.ioNum(y); ar.ioNum(vx); ar.ioNum(vy);
+            ar.ioNum(rotAngle); ar.ioNum(rotSpeed);
+            ar.ioBool(onGround); ar.ioBool(rushing);
+            ar.ioNum(shakeDelay); ar.ioNum(shakePhase);
+            ar.ioNum(rushVx); ar.ioNum(rushVy); ar.ioNum(floorY);
+        }
     };
 
     Ch2SphereBoss() : cx(900), cy(290), worldX(1200), radius(150),
@@ -48,6 +60,17 @@ public:
         cx = worldX; cy = 290;
     }
 
+    // Normal flow entry: sphere appears 1200 units ahead of the CURRENT scroll,
+    // so it works regardless of how far the corridor has already scrolled.
+    void startEnteringAt(double scrollX) {
+        reset();
+        generateCells();
+        state = ENTERING; stateTimer = 0;
+        worldX = scrollX + 1200.0;
+        cx = worldX - scrollX;  // = 1200 on screen
+        cy = 290;
+    }
+
     // Test mode: spawn sphere at center in FIGHT state immediately
     void startAtCenter() {
         reset();
@@ -66,9 +89,25 @@ public:
     double getCx() const { return cx; }
     double getCy() const { return cy; }
     double getRadius() const { return radius; }
+    int getHp() const { return hp; }
+    int getMaxHp() const { return maxHp; }
     double getBgTargetSpeed() const { return bgTargetSpeed; }
     void clearBgTargetSpeed() { bgTargetSpeed = -1.0; }
     void takeDamage(int dmg) { if (state == FIGHT) { hp -= dmg; if (hp < 0) hp = 0; } }
+
+    // 存档：球体 Boss 全部状态（六角格子激活/碎裂进度、碎片、激活顺序表）
+    // 注意：activationByOrder 会被打乱，必须原样存取；bg/playerRef 是指针，不进存档。
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioNum(cx); ar.ioNum(cy); ar.ioNum(worldX); ar.ioNum(radius);
+        ar.ioNum(hp); ar.ioNum(maxHp);
+        ar.ioVecObj(cells);
+        ar.ioVecNum(activationByOrder);
+        ar.ioVecObj(debris);
+        ar.ioEnum(state); ar.ioNum(stateTimer);
+        ar.ioNum(activationIdx); ar.ioNum(shatterIdx); ar.ioNum(rushIdx);
+        ar.ioNum(fixedSeed); ar.ioNum(entryStartX); ar.ioBool(entryBgStopped);
+        ar.ioNum(bgTargetSpeed);
+    }
 
     void update() {
         if (state == INACTIVE || state == DONE) return;

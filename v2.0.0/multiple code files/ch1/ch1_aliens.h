@@ -228,4 +228,10 @@ public:
     void setAllInvincible() { for (auto& a : aliens) a.invincibleFrames = -1; }
     void setAllVulnerable() { for (auto& a : aliens) a.invincibleFrames = 0; }
     int& spawnTimerRef() { return spawnTimer; }
+
+    // 存档：全部外星飞船 + 出场计时 + 难度参数
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(aliens);
+        ar.ioNum(spawnTimer); ar.ioNum(baseSpeed); ar.ioNum(spawnInterval); ar.ioNum(hpBonus);
+    }
 };

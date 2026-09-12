@@ -13,6 +13,15 @@ class AudioEngine {
     volatile bool bgmOff;       // silence BGM on start/pause screens
     std::vector<ActiveSound> activeSnd;
 
+    // Voice channel (narration / dialogue WAV clips, normalized mono 44.1k)
+    struct VoiceClip {
+        std::vector<float> samples;
+        Uint32 pos;
+        bool active;
+    };
+    std::vector<VoiceClip> voiceClips;
+    float voiceGain;
+
     // BGM state
     float bgmPhase, bgmPulsePhase;
     int bgmStepCounter, bgmNoteIndex;
@@ -167,6 +176,15 @@ class AudioEngine {
                 s.samplesLeft--;
             }
         }
+        // Voice clips (narration / dialogue): mono 44.1k float
+        for (auto& v : voiceClips) {
+            if (!v.active) continue;
+            for (int i = 0; i < n && v.pos < (Uint32)v.samples.size(); ++i, ++v.pos) {
+                buf[i] += v.samples[v.pos] * voiceGain;
+            }
+        }
+        voiceClips.erase(std::remove_if(voiceClips.begin(), voiceClips.end(),
+            [](const VoiceClip& v){ return v.pos >= v.samples.size(); }), voiceClips.end());
         for (int i = 0; i < n; ++i) {
             if (buf[i] > 0.9f) buf[i] = 0.9f;
             if (buf[i] < -0.9f) buf[i] = -0.9f;
@@ -181,7 +199,8 @@ public:
                     ch2Bgm(false), bgmOff(false),
                     bgmPhase(0), bgmPulsePhase(0), bgmStepCounter(0),
                     bgmNoteIndex(0), bgmNoteFreq(0), bgmNoteLen(0),
-                    ch2BassIdx(0), ch2BassLen(0), ch2BassFreq(0), ch2BassPhase(0) {
+                    ch2BassIdx(0), ch2BassLen(0), ch2BassFreq(0), ch2BassPhase(0),
+                    voiceGain(0.9f) {
         SDL_AudioSpec want;
         SDL_memset(&want, 0, sizeof(want));
         want.freq = 44100;
@@ -196,6 +215,118 @@ public:
 
     ~AudioEngine() { if (audioDev) SDL_CloseAudioDevice(audioDev); }
 
+    // ==================== Voice clips (narration / dialogue) ====================
+    // CRC-32 (IEEE, same as Python zlib.crc32) of a text line → clip filename.
+    // The voice pipeline (tools/voice_pipeline.py) writes voice/<lang>/<hash>.wav
+    // using the same hash, so game text and audio stay in sync automatically.
+    static uint32_t voiceCrc32(const char* s) {
+        uint32_t crc = 0xFFFFFFFFu;
+        for (; *s; ++s) {
+            crc ^= (unsigned char)*s;
+            for (int k = 0; k < 8; ++k)
+                crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+        return crc ^ 0xFFFFFFFFu;
+    }
+
+    // Loads a PCM WAV (8/16-bit int or 32-bit float, mono/stereo, any rate),
+    // normalizes to mono 44.1kHz float and plays it. Returns false when the
+    // file is missing (game silently falls back to text / synthetic blips).
+    bool playVoice(const char* path) {
+        std::vector<float> samples;
+        if (!loadWavToMonoFloat(path, samples) || samples.empty()) return false;
+        VoiceClip v;
+        v.samples.swap(samples);
+        v.pos = 0;
+        v.active = true;
+        if (audioDev) SDL_LockAudioDevice(audioDev);
+        voiceClips.push_back(v);
+        if (audioDev) SDL_UnlockAudioDevice(audioDev);
+        return true;
+    }
+
+    void stopVoice() {
+        if (audioDev) SDL_LockAudioDevice(audioDev);
+        voiceClips.clear();
+        if (audioDev) SDL_UnlockAudioDevice(audioDev);
+    }
+    bool voicePlaying() const {
+        for (const auto& v : voiceClips)
+            if (v.pos < v.samples.size()) return true;
+        return false;
+    }
+
+private:
+    static bool loadWavToMonoFloat(const char* path, std::vector<float>& out) {
+        SDL_AudioSpec spec;
+        Uint8* wav = nullptr;
+        Uint32 wavLen = 0;
+        if (!SDL_LoadWAV(path, &spec, &wav, &wavLen)) return false;
+        int srcRate = spec.freq > 0 ? spec.freq : 44100;
+        int ch = spec.channels > 0 ? spec.channels : 1;
+        Uint16 fmt = spec.format;
+
+        // Decode interleaved samples to float
+        std::vector<float> inter;
+        inter.reserve(wavLen / 2 + 1);
+        int bits = SDL_AUDIO_BITSIZE(fmt);
+        bool isFloat = SDL_AUDIO_ISFLOAT(fmt) != 0;
+        bool isBig = SDL_AUDIO_ISBIGENDIAN(fmt) != 0;
+        if (bits == 16) {
+            for (Uint32 i = 0; i + 1 < wavLen; i += 2) {
+                short s;
+                if (isBig) s = (short)((wav[i] << 8) | wav[i + 1]);
+                else       s = (short)((wav[i + 1] << 8) | wav[i]);
+                inter.push_back((float)s / 32768.0f);
+            }
+        } else if (bits == 8) {
+            for (Uint32 i = 0; i < wavLen; ++i)
+                inter.push_back(((float)wav[i] - 128.0f) / 128.0f);
+        } else if (bits == 32 && isFloat) {
+            for (Uint32 i = 0; i + 3 < wavLen; i += 4) {
+                Uint32 u;
+                if (isBig) u = ((Uint32)wav[i] << 24) | ((Uint32)wav[i+1] << 16)
+                             | ((Uint32)wav[i+2] << 8) | (Uint32)wav[i+3];
+                else       u = ((Uint32)wav[i+3] << 24) | ((Uint32)wav[i+2] << 16)
+                             | ((Uint32)wav[i+1] << 8) | (Uint32)wav[i];
+                float f;
+                memcpy(&f, &u, 4);
+                inter.push_back(f);
+            }
+        }
+        SDL_FreeWAV(wav);
+        if (inter.empty()) return false;
+
+        // Downmix to mono
+        std::vector<float> mono;
+        if (ch > 1) {
+            mono.resize(inter.size() / ch);
+            for (size_t i = 0; i < mono.size(); ++i) {
+                float s = 0.0f;
+                for (int c = 0; c < ch; ++c) s += inter[i * ch + c];
+                mono[i] = s / (float)ch;
+            }
+        } else {
+            mono.swap(inter);
+        }
+
+        // Linear resample to 44.1kHz
+        const int OUT_RATE = 44100;
+        if (srcRate == OUT_RATE) { out.swap(mono); return true; }
+        size_t outLen = (size_t)((double)mono.size() * OUT_RATE / (double)srcRate);
+        out.resize(outLen);
+        for (size_t i = 0; i < outLen; ++i) {
+            double t = (double)i * (double)srcRate / (double)OUT_RATE;
+            size_t i0 = (size_t)t, i1 = i0 + 1;
+            double f = t - (double)i0;
+            float a = mono[i0];
+            float b = (i1 < mono.size()) ? mono[i1] : a;
+            out[i] = a + (b - a) * (float)f;
+        }
+        return true;
+    }
+
+public:
     void setBossMusic(bool on) { bossMusicOn = on; }
     void setCh2Bgm(bool on) { ch2Bgm = on; }
     void setBgmOff(bool off) { bgmOff = off; }
@@ -260,6 +391,8 @@ public:
     void sndTowerTalk() { playSound(800, 400, 16, 0.08f, 3, 1); }   // tower AI: mid sweep
     void sndBryssaTalk(){ playSound(1500, 600, 12, 0.07f, 1, 2); }  // human comms: mid-high square
     void sndSystemTalk(){ playSound(1000, 0, 10, 0.05f, 0, 2); }    // system msg: pure sine ping
+    void sndMarthaTalk(){ playSound(950, 500, 12, 0.06f, 1, 1); }   // pilot Martha: mid-low square
+    void sndMoonwellTalk(){ playSound(1400, 500, 18, 0.07f, 0, 2); } // Moonwell AI: descending sine
     void sndPlayerHit() { // heavy damage impact
         playSound(80, 0, 55, 0.22f, 2, 0);    // low thud
         playSound(200, 0, 40, 0.16f, 1, 1);   // mid impact
@@ -277,6 +410,16 @@ public:
     void adjEqLow(int d) { eqLow += d; if (eqLow < -5) eqLow = -5; if (eqLow > 5) eqLow = 5; }
     void adjEqMid(int d) { eqMid += d; if (eqMid < -5) eqMid = -5; if (eqMid > 5) eqMid = 5; }
     void adjEqHigh(int d) { eqHigh += d; if (eqHigh < -5) eqHigh = -5; if (eqHigh > 5) eqHigh = 5; }
+
+    // 设置持久化恢复用（范围与 adj* 相同，越界自动夹紧）
+    void setSoundState(int bgm, int sfx, int low, int mid, int high) {
+        bgmVolume = bgm; sfxVolume = sfx; eqLow = low; eqMid = mid; eqHigh = high;
+        if (bgmVolume < 1) bgmVolume = 1; if (bgmVolume > 10) bgmVolume = 10;
+        if (sfxVolume < 1) sfxVolume = 1; if (sfxVolume > 10) sfxVolume = 10;
+        if (eqLow < -5) eqLow = -5; if (eqLow > 5) eqLow = 5;
+        if (eqMid < -5) eqMid = -5; if (eqMid > 5) eqMid = 5;
+        if (eqHigh < -5) eqHigh = -5; if (eqHigh > 5) eqHigh = 5;
+    }
 };
 
 const float AudioEngine::BGM_MELODY[32] = {

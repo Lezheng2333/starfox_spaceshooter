@@ -94,6 +94,19 @@ public:
     bool isCh1HealWavesEnabled() const { return healWavesEnabled; }
     std::vector<Ch1HealWave>& getCh1HealWaves() { return healWaves; }
 
+    // 存档：Telamondo 全部战斗状态（cfg 指针不入档，读档后由 Game 重新绑定章节配置）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioNum(y); ar.ioNum(hp); ar.ioNum(maxHp); ar.ioNum(bonusHp);
+        ar.ioBool(active); ar.ioNum(x); ar.ioNum(moveTime); ar.ioNum(flashTimer);
+        ar.ioNum(lastHitBySW);
+        ar.ioBool(entering); ar.ioNum(enterFrame); ar.ioNum(enterDuration);
+        ar.ioBool(phase2Triggered); ar.ioNum(shakeTimer); ar.ioNum(shakeX); ar.ioNum(shakeY);
+        ar.ioNum(absorbTimer); ar.ioNum(absorbIndex); ar.ioNum(absorbCooldown);
+        ar.ioEnum(absorbState); ar.ioNum(absorbTargetIdx); ar.ioNum(postAbsorbTimer);
+        ar.ioBool(healWavesEnabled);
+        ar.ioVecObj(healWaves); ar.ioNum(healWaveTimer); ar.ioNum(nextCh1HealWaveID);
+    }
+
     void takeDamage(int dmg) {
         flashTimer = 5;
         if (bonusHp > 0) {

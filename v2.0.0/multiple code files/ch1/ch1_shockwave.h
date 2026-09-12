@@ -185,6 +185,14 @@ public:
             [](const Ch1Shockwave& sw){ return !sw.active; }), shockwaves.end());
     }
 
+    // 存档：冲击波 + 等级/伤害/计时/待释放标记
+    // （timer/lastLevel/pending 必须一起存，否则读档瞬间会立刻放出一发冲击波）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(shockwaves);
+        ar.ioNum(nextID); ar.ioNum(timer); ar.ioNum(interval); ar.ioNum(damage);
+        ar.ioNum(kills); ar.ioNum(lastLevel); ar.ioBool(pending);
+    }
+
     std::vector<Ch1Shockwave>& all() { return shockwaves; }
     int getLevel() const { return damage - 2; }
     void setPending(bool p) { pending = p; }

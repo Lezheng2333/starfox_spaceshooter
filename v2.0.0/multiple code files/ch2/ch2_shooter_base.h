@@ -61,6 +61,10 @@ public:
     int getPlayerHP() const { return hpRef; }
     const std::vector<Ch2EnemyBullet>& getBullets() const { return bullets; }
     void resetBase() { bullets.clear(); hpRef = 3; goRef = false; }
+    void clearBullets() { bullets.clear(); }
+
+    // 存档：敌方子弹（hpRef/goRef 是 Game 的引用，由 Game 层单独存）
+    template <class Ar> void visitBase(Ar& ar) { ar.ioVecObj(bullets); }
 
     static void computeHPColor(double hpR, int& r, int& g, int& b) {
         r = 255; g = (int)(150*hpR + 80*(1-hpR)); b = (int)(100*hpR + 30*(1-hpR));
@@ -138,6 +142,12 @@ public:
     bool justEnteredTriple() const { return tripleJustEntered; }
     int getTripleTimer() const { return tripleTimer; }
     float getFill() const { return (float)(energy / MAX_ENERGY); }
+
+    // 存档：白色能量条（能量值/命中窗口计时/三连发剩余时间）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioNum(energy); ar.ioNum(lastHitFrame); ar.ioNum(frameCounter);
+        ar.ioBool(tripleActive); ar.ioBool(tripleJustEntered); ar.ioNum(tripleTimer);
+    }
     bool isDecaying() const { return !tripleActive && energy > 0 && frameCounter - lastHitFrame > HIT_WINDOW; }
     bool isCharging() const { return !tripleActive && energy > 0 && frameCounter - lastHitFrame <= HIT_WINDOW; }
 

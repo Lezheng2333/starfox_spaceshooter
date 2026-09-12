@@ -33,6 +33,9 @@ public:
         }
     }
 
+    // 存档：全部浮动文字（位置/寿命/文本/颜色）
+    template <class Ar> void visit(Ar& ar) { ar.ioVecObj(texts); }
+
     const std::vector<FloatingText>& all() const { return texts; }
     void clear() { texts.clear(); }
 };

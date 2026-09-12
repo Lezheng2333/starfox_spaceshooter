@@ -179,6 +179,12 @@ public:
             [](const Ch1Bullet& b){ return !b.active; }), bullets.end());
     }
 
+    // 存档：飞行中的子弹 + 射击冷却参数
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(bullets);
+        ar.ioNum(fireCooldown); ar.ioNum(fireDelay); ar.ioNum(bulletSpeed);
+    }
+
     std::vector<Ch1Bullet>& all() { return bullets; }
     int getFireDelay() const { return fireDelay; }
     double getBulletSpeed() const { return bulletSpeed; }

@@ -15,6 +15,7 @@ public:
     AimAssist() : snapProgress(0) {}
     void update(bool hasTarget) { updateProgress(snapProgress, hasTarget); }
     double getSnapProgress() const { return snapProgress; }
+    template <class Ar> void visit(Ar& ar) { ar.ioNum(snapProgress); }
     void draw(SDL_Renderer* r, double drawX, double drawY, int dotBig, int dotSmall) const {
         double ss = 8.0 * (1.0 - snapProgress);
         if (ss > 0.5) {

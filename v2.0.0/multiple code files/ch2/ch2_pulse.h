@@ -54,6 +54,12 @@ public:
 
     bool isFull() const { return unlocked && energy >= MAX_ENERGY; }
 
+    // 存档：绿色脉冲能量/解锁状态/扩散中的冲击波环
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioNum(energy); ar.ioBool(unlocked); ar.ioBool(draining);
+        ar.ioVecObj(waves); ar.ioNum(nextWaveID);
+    }
+
     // Breathing: bright green ↔ dark green when full (for HUD rendering)
     float getBreathAlpha() const {
         if (!isFull()) return 1.0f;

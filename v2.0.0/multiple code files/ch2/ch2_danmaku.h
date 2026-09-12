@@ -31,6 +31,13 @@ class Ch2DanmakuManager : public Ch2ShooterBase {
 public:
     Ch2DanmakuManager(int& hp, bool& go) : Ch2ShooterBase(hp, go) {}
     void reset() { enemies.clear(); resetBase(); }
+    void clearAll() { enemies.clear(); bullets.clear(); }
+
+    // 存档：全部弹幕敌人 + 敌方子弹（含螺旋角/发射计时，读档后弹幕无缝继续）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(enemies);
+        Ch2ShooterBase::visitBase(ar);
+    }
 
     void spawnEnemy() {
         Ch2DanmakuEnemy e;

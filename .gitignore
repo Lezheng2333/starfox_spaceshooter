@@ -22,3 +22,14 @@ SPHERE_BOSS_PLAN.md
 shooter
 v2.0.0/multiple code files/shooter
 v2.0.0/multiple code files/.DS_Store
+
+# voice pipeline local deps
+tools/pip_edge/
+
+# 语音资源（34MB WAV，本地生成，不入库；用 tools/voice_pipeline.py 重新生成）
+v2.0.0/multiple code files/voice/
+
+# 存档 / 设置（玩家本地数据，不入库）
+saves/
+*/saves/
+v2.0.0/multiple code files/shooter_test

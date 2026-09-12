@@ -955,7 +955,6 @@ Ver 1.0.1 | 2026-05-08
 
   Ver 1.2.21 | 代码架构重构：单文件→28个多文件模块化
     - 全量代码重构：从6633行单文件拆分为28个头文件+1个main.cpp的结构化项目
-
     - 文件结构映射：
       - types.h — 全部18个struct（Star/FloatingText/BossConfig/ChapterConfig/FontChar/ActiveSound/
         MenuItem/Ch1Particle/BulletBase/Ch1Bullet/EnemyData/Ch1Alien/Ch1Shockwave/Ch1HealWave/
@@ -986,3 +985,162 @@ Ver 1.0.1 | 2026-05-08
     - 旧单文件存档为 v2.0.0/space_shooting ver1.2.20 single-file archive.cpp
 
     - 零行逻辑修改，纯剪切粘贴重构
+
+Ver 1.2.22 | 第二章完整流程整合：门禁序列 + NightElf升级 + 章节Boss + 结局
+    - 新增 Ch2GateScene 门禁场景（新文件 ch2/ch2_gate.h，316行）：
+      - 画面右侧巨大真空门（双面板+上下监视扫描头+指示灯），镂空线稿风格
+      - Ally 脉冲解锁序列：以飞机为圆心的5层同心圆脉冲组，每2秒一组共5组，
+        每组消耗绿色能量条 1/5（满格30→0），最外圈圆最亮形成渐变
+      - 门指示灯亮起→窄扇形红色扫描光束锁定教练机→Moonwell AI 三段对话
+      - 大门双面板缓缓分开，玩家驾驶飞机向右飞入门内（白色淡入转场）
+      - ESC 一键跳过整段门禁演出（直接开门）；门禁阶段禁用射击
+    - 新增 Ch2LabScene 中央研究室场景（新文件 ch2/ch2_lab.h，103行）：
+      - 圆形研究室（圆墙+径向肋条+旋转雷达光扫+顶光锥），廊桥背景停止滚动
+      - 暗夜精灵号停放在基座上（底座呼吸光环+光柱），"CENTRAL LAB"白色大字
+    - 新增 Ch2WardenBoss 章节Boss（新文件 ch2/ch2_boss.h，350行）：
+      - 名称 "MOONWELL WARDEN"，350 HP，175 HP 半血狂暴（ENRAGED）
+      - 造型：大菱形核心+8枚环绕碎片+4片旋转刀刃，镂空线稿风格
+      - 三种弹幕模式循环：放射弹幕/瞄准三连发/螺旋弹幕，狂暴后加速加密
+      - 周期性召唤2只普敌增援；水晶子弹可被玩家子弹击碎；Boss战自动切Boss BGM
+      - 击败流程：DYING 链式爆炸→清场→结局旁白→MISSION COMPLETE
+    - 第二章流程状态机（Ch2Flow 七段）：
+      门禁GATE→廊桥CORRIDOR→球体SPHERE→追逐CHASE→研究室LAB→Boss BOSS→结局ENDED
+      - 廊桥飞行对话结束后，球体Boss在任意滚动距离前方1200单位处生成
+        （新增 startEnteringAt，修正世界坐标与滚动距离的耦合）
+      - 脉冲解锁+波次清场后自动进入中央研究室
+      - 触碰暗夜精灵号→粒子汇聚升级动画→飞机切换为 NightElf
+      - NightElf 激活：白色能量条（绿条下方），命中50次充能→15秒三炮模式
+        （triple-fire），最后3秒倒计时提示音，"TRIPLE FIRE!"浮动文字
+      - 升级后 Warden 拦截去路→击败→清场→结局旁白（4页）→MISSION COMPLETE
+      - NEXT CHAPTER 解锁第三章并直接进入其开幕旁白
+    - 第二章剧情对话全部接入（12组触发点，含新说话人 Martha / Moonwell (ai)）：
+      门前 Bryssa/Martha/Ally 对话→Moonwell AI 扫描对话→廊桥对话→球体遭遇/
+      激活→追逐提示→技能球提示→脉冲解锁提示→研究室发现→升级讲解→Boss警报→狂暴警告
+    - 新增角色语音音效：sndMarthaTalk / sndMoonwellTalk
+    - 测试模式第二章扩展为6入口：SPHERE BOSS FULL / COMBAT ONLY / PULSE ORB TEST /
+      GATE SEQUENCE / NIGHTELF LAB / WARDEN BOSS
+    - HUD 扩展：白色能量条三色态（充能白/衰减灰/三发脉冲青）+ 通用Boss血条
+      （球体Boss血条"???"显示于球体上方，按剧本补全）
+    - 瞄准辅助吸附章节Boss；脉冲释放移至公共区（Boss战/研究室同样可用）；
+      Boss/球体命中计能量（白色能量条与绿色能量条联动）
+    - 无头集成测试验证全流程（门禁→结局 全阶段自动机 + Ch1 回归冒烟，
+      GATE/SPHERE/CHASE/LAB/BOSS/ENDED 各阶段状态断言全部通过）
+    - BUGFIX: 门禁阶段飞机被活动范围钳制无法进门 — 开门后放宽活动范围至门内
+    - BUGFIX: Boss死亡后流程卡死 — 结局旁白触发时同步切换 C2_ENDED
+    - BUGFIX: 研究室升级后飞机被吸回基座 — 停泊位置赋值限定在触碰前
+    - BUGFIX: 场景转场白屏卡死 — 淡出计时器移入公共区统一推进
+
+Ver 1.2.22 (补充) | 第一/二章旁白对话双语语音配音 (VOICE OVER,版本号不变)
+    - AudioEngine 新增语音播放通道:playVoice()/stopVoice()/voicePlaying()
+      - 支持 8/16-bit int 与 32-bit float WAV(任意采样率/声道),
+        加载时归一化为 mono 44.1kHz float,线性重采样
+      - 与 SFX 通道独立混音(固定增益 0.9),语音不受 BGM 静音影响;
+        播放/停止均在 SDL_LockAudioDevice 保护下操作(回调线程安全)
+      - 新增 voiceCrc32()(标准 CRC-32/IEEE,与 Python zlib.crc32 逐字节一致)
+    - 语音挂钩:旁白页切换/对话行切换时自动播放配音
+      - 文本 → 文件映射走 voice/voice_manifest.txt(<lang> <crc32> <相对路径>,
+        启动时加载),文本改动自动映射新文件,缺失文件静默跳过
+      - 旁白打字机字母弹出音效(sndTeletype)始终保留,与配音同时播放
+      - 对话行有真实语音时自动屏蔽合成"电报音"音效(无声文件则保留原音效)
+      - ESC 跳过旁白 / 暂停 / 旁白结束 时自动停止语音
+    - 设置新增 VOICE LANG 开关(OPTIONS 菜单第 2 项),三态循环:
+      0=中文(ZH,默认)/ 1=English(EN)/ 2=OFF(关闭配音,仅保留字母弹出音效)
+    - 音频文件按章节+角色分文件夹命名:
+      voice/<zh|en>/ch<N>/nar_XX.wav(旁白页)+ dlg_<角色>_XX.wav(对话句),
+      角色缩写 narrator/martha/bryssa/ally/tower/moonwell/system
+    - 语音资源管线 tools/voice_pipeline.py:
+      - collect:从 game.h 自动提取全部旁白页+对话行并按章节归属(第一章对话
+        位于 updateGameplay,第二章位于 updateCh2Gate~updateBossDefeat 区间),
+        C 转义还原原文,内置 104 条中英对照表(100% 覆盖)→ voice_script.json
+      - generate:按"角色→音色"映射合成双语 WAV(edge-tts 在线 / piper 离线 /
+        gpt-sovits API 三种后端),--chapters 按章节过滤,6 线程并行+失败重试,
+        纯标点句("……")自动跳过(无声停顿),结尾自动生成 voice_manifest.txt
+    - 已生成第一+二章全部语音(182 个文件,34MB,22050Hz 16bit mono):
+      第一章 11 页旁白+34 句对话;第二章 15 页开幕旁白+4 页结局旁白+32 句剧情对话;
+      角色音色映射:旁白 zh-Yunyang/en-Christopher;Martha zh-Xiaoxiao/en-Jenny;
+      Ally zh-Yunxi/en-Guy;Tower zh-Yunjian/en-Brian;Bryssa zh-Xiaoyi/en-Sonia;
+      Moonwell zh-Yunjian(慢速)/en-Andrew;系统 zh-Yunxi/en-Aria
+    - 无头测试验证:manifest 加载/zh·en·OFF 三态/第一章第二章语音命中/
+      标点静默/选项三态循环,全部通过
+    - BUGFIX: 语音通道推入无锁保护 — 与音频回调存在数据竞争,补
+      SDL_LockAudioDevice 包裹
+
+Ver 1.2.23 | 测试模式退役：全量存档 / 读档回到存档瞬间同一帧 / 自由读档与另存为
+----------------------------------------------------------------
+
+    - 存档系统上线，TEST 测试模式改为隐藏入口（--test），主菜单原位置换成 LOAD GAME
+
+    - 新增存档系统（新文件 save_system.h）：
+      - 文件格式：magic "SFSSAVE0" + 格式版本 + 游戏版本 + payload 长度 + CRC32 + payload
+      - 写入采用 临时文件 + rename，中途失败不会留下半个存档
+      - payload 最前端是 SaveMeta 摘要（章节/章节名/分数/血量/流程段落/游戏版本/时间戳），
+        读档列表只解析摘要，不反序列化整份状态
+
+    - 全量状态快照（Game::serializeAll()，字段顺序即存档字节顺序）：
+      - 玩家三架子机（教练机/Ch2Trainer/暗夜精灵号，含无敌帧、滚转角、瞄准辅助进度）、
+        飞行中的玩家子弹（透视弹道与侧滚弹道）、基地血量、分数、难度计时、章节与
+        Ch1 剧情触发位图 triggeredScores[256]
+      - Ch1：外星飞船（含入场动画/被吸收状态）、Boss TELAMONDO 全状态（阶段/吸收状态机/
+        治疗波）、冲击波（含 pending/lastLevel，避免读档瞬间白放一发）、粒子、浮动文字、星空
+      - Ch2：门禁场景（阶段/脉冲环组/开门进度/扫描光束）、球体Boss（六角密铺格子激活与
+        碎裂顺序表/碎片物理）、普敌与弹幕敌人（含螺旋角/发射计时）、敌方子弹、技能球
+        （护罩/吸收进度/碎片）、绿色脉冲能量与冲击波环、白色能量条（含三连发剩余时间）、
+        Warden Boss（弹幕模式循环/召唤计时）、研究室计时、廊桥滚动与星星/立柱/地板缝
+      - 对话系统（队列/打字机已显示字数/淡出位移/历史记录/暂停菜单滚动焦点）、
+        旁白系统（当前页/逐字进度）、流程状态机 ch2Flow 与全部 *Queued 一次性标记、
+        自动出敌调度、章节 Boss 击破演出计时
+
+    - 读档语义（按需求定制）：读档后定格在"暂停 + 暂停菜单"，画面就是存档瞬间那一帧；
+      玩家选 RESUME → 3-2-1 倒计时 → 从原状态继续
+      - 读档后强制 countdown=-1，避免"读档即自动倒计时"，一定要玩家自己退菜单
+      - 复位所有按键边沿检测与对话/旁白的 ENTER 抑制，防止读档瞬间被按住的键跳过内容
+      - 跨章节读档：按存档章节重建章节配置与星空背景、重新绑定 Boss 配置与机体指针
+
+    - 存档界面（新文件 save_menu.h）：
+      - 暂停菜单新增 SAVE GAME / LOAD GAME（原 5 项 → 7 项）
+      - 槽位：AUTO（自动槽）+ SLOT 1-6，列表显示章节/流程段落/分数/血量/存档版本/时间
+      - 空槽位、损坏或版本不符的槽位分别显示 EMPTY / UNREADABLE，可读档时给出精确失败原因
+      - 覆盖槽位、覆盖文件、读档覆盖当前进度都有 ENTER/ESC 二次确认
+      - 游戏内迷你文件浏览器（自由读档 + 另存为任意路径）：W/S 移动、ENTER 进入目录或选中、
+        BACKSPACE 返回上级、ESC 返回；另存为首行是自动命名的 [ NEW FILE ]
+
+    - 自动存档：每章开始（PLAY/CHAPTER/下一章/重开）、Ch2 每次流程段落切换写入 AUTO 槽
+      （旁白阻塞结束后才落盘；结局段落不覆盖 AUTO 槽）
+
+    - 存档位置：优先 ./saves/（开发时在可执行文件旁，与 voice/ 同级），
+      不可写则自动回退 ~/Library/Application Support/StarFoxSpaceShooter/saves/
+      （发布成 .app 后从 Finder 启动时 cwd=/，且写进 bundle 会破坏签名）；
+      环境变量 SFSS_SAVE_DIR 可强制指定
+
+    - OPTIONS 设置持久化：瞄准辅助 / VOICE LANG / BGM·SFX 音量 / 三段 EQ 存入
+      saves/settings.dat，改动即落盘，退出前再存一次，启动时自动恢复
+
+    - 版本与结构规则：存档只按格式版本把关（SAVE_FORMAT_VERSION）+ CRC32 校验，
+      游戏版本号仅作显示诊断，因此小版本更新不会作废玩家存档；
+      任何改动 serializeAll 字段顺序/类型的修改都必须把格式版本 +1
+
+    - 开发自检 ./shooter --selftest（无窗口，返回码 0=PASS），把"存档→继续玩→读档"
+      的等价性做成可回归验证：
+      - 4 个状态场景（第二章追逐战 / 第二章门禁对话 / 章节Boss Warden / 第一章 Telamondo）
+        各跑 180 帧改变状态后读档，比对"重新序列化的状态字节"与"重绘画面的像素"
+      - 结果：4 个场景状态字节完全一致，门禁/Boss/第一章三个场景画面逐像素一致（差异 0），
+        追逐战仅技能球呼吸光效存在 ±8/255 的实时钟差异
+      - 菜单接线自检（合成按键驱动真实单帧逻辑）：主菜单→LOAD GAME→AUTO 槽→确认→读档→
+        RESUME 倒计时→恢复；ESC 暂停→SAVE GAME→写槽位；文件浏览器进出；跨章节读档；
+        设置持久化往返；BACK 返回主菜单
+      - 自检把存档目录重定向到 /tmp，不会污染玩家真实存档
+      - 同时导出 5 张界面截图（/tmp/sfss_shots/01_start ~ 05_file_browser.bmp），
+        便于人工核对排版（已核对：读档列表 9 行、存档列表 8 行、暂停菜单 7 项、
+        文件浏览器 4 行，右边距 ≥28px 无越界/重叠）
+
+    - 代码结构调整：Game::run() 的单帧逻辑抽成 stepFrame()（主循环只做事件轮询/限帧/
+      present），使菜单与存档流程可以被合成按键自动化验证
+
+    - 测试模式保留但隐藏：./shooter --test 才显示 TEST 入口，代码标注
+      [DORMANT — 激活条件：命令行参数 --test]，便于开发时跳关复现
+
+    - BUGFIX: SaveMeta.chapterTitle 字符串尾部未清零导致存档字节不确定（无法做逐字节
+      校验），改为写入前整块 memset
+
+    - BUGFIX: 从暂停菜单以外的路径打开存/读档界面时其它界面标志未清空，单帧分派会继续
+      停在旧界面（例如主菜单），统一收进 beginSaveLoadScreen()

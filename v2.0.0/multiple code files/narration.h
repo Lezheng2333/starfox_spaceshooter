@@ -7,11 +7,17 @@
 // ============== NarrationSystem (center narration only) ==============
 class NarrationSystem {
     struct Line {
+        std::string raw;        // original queued text (for voice clip lookup)
         std::vector<std::string> vlines;
         int numLines;
         int revealed;
         int popupTimer;
         int typeTimer;
+        template <class Ar> void visit(Ar& ar) {
+            ar.ioStr(raw);
+            ar.ioVecStr(vlines);
+            ar.ioNum(numLines); ar.ioNum(revealed); ar.ioNum(popupTimer); ar.ioNum(typeTimer);
+        }
     };
 
     static const int POPUP_FRAMES = 18;
@@ -36,6 +42,7 @@ class NarrationSystem {
 public:
     void queue(const char* text) {
         Line l;
+        l.raw = text ? text : "";
         l.revealed = 0; l.popupTimer = 0; l.typeTimer = 0;
         std::string s(text);
         const int maxChars = 36;
@@ -69,6 +76,21 @@ public:
 
     bool isActive() const { return active; }
     int popTicks() { int n = ticks; ticks = 0; return n; }
+    // 读档后调用：避免读档瞬间跳过当前旁白页
+    void suppressEnter() { enterWas = true; }
+
+    // 存档：旁白队列 + 当前页 + 逐字进度（enterWas 保持 true 防止读档误跳过）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(lines);
+        ar.ioNum(curLine); ar.ioBool(active); ar.ioNum(bgAlpha); ar.ioNum(bgTimer);
+        ar.ioBool(enterWas); ar.ioNum(ticks);
+    }
+    int getCurLine() const { return active ? curLine : -1; }
+    const std::string& currentRawText() const {
+        static std::string none;
+        if (!active || curLine < 0 || curLine >= (int)lines.size()) return none;
+        return lines[curLine].raw;
+    }
 
     void reset() {
         lines.clear(); curLine = 0; active = false;

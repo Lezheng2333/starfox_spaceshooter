@@ -87,7 +87,11 @@ echo "Zip OK"
 
 echo "=== Step 5: Git commit & push ==="
 cd "$PROJECT_ROOT"
-git add DEVELOPMENT_LOG.md README.md "$SRC_DIR/$SRC_SUBDIR/" "$RELEASE_DIR/$ZIP_NAME" "$SRC_DIR/space_shooting ver1.2.20 single-file archive.cpp" .claude/skills/release.sh CLAUDE.md
+git add .gitignore DEVELOPMENT_LOG.md README.md CLAUDE.md \
+    "$SRC_DIR/$SRC_SUBDIR/" "$RELEASE_DIR/$ZIP_NAME" \
+    "$SRC_DIR/space_shooting ver1.2.20 single-file archive.cpp"
+# .claude/ 在 .gitignore 里（IDE 目录），但本脚本本身是已跟踪文件，需 -f 强制暂存
+git add -f .claude/skills/release.sh
 git commit -m "$TITLE"
 git push origin main
 echo "Push OK"

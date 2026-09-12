@@ -7,8 +7,14 @@
 // ============== Ch2Background ==============
 class Ch2Background {
 private:
-    struct Star2 { double wx, wy; float phase, twinkleSpeed; bool isCross; };
-    struct Pillar { double wx; bool isMajor; };
+    struct Star2 { double wx, wy; float phase, twinkleSpeed; bool isCross;
+        template <class Ar> void visit(Ar& ar) {
+            ar.ioNum(wx); ar.ioNum(wy); ar.ioNum(phase); ar.ioNum(twinkleSpeed); ar.ioBool(isCross);
+        }
+    };
+    struct Pillar { double wx; bool isMajor;
+        template <class Ar> void visit(Ar& ar) { ar.ioNum(wx); ar.ioBool(isMajor); }
+    };
 
     std::vector<Star2> stars;
     std::vector<Pillar> pillars;
@@ -107,6 +113,19 @@ public:
     }
     void setSpeed(double s) { scrollSpeed = s; }
     double getScrollX() const { return scrollX; }
+
+    // 存档：走廊滚动进度 + 星星/立柱/地板缝（读档后画面与存档帧完全一致）
+    template <class Ar> void visit(Ar& ar) {
+        ar.ioVecObj(stars);
+        ar.ioVecObj(pillars);
+        ar.ioNum(scrollX); ar.ioNum(scrollSpeed); ar.ioNum(genNext);
+        for (int t = 0; t < N_SEAM_TRACKS; ++t) {
+            ar.ioNum(seamTracks[t].y);
+            ar.ioNum(seamTracks[t].spacing);
+            ar.ioNum(seamTracks[t].genNext);
+            ar.ioVecNum(seamTracks[t].wxs);
+        }
+    }
 
     void update() {
         scrollX += scrollSpeed;

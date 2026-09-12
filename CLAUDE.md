@@ -24,6 +24,27 @@
 - **SDL2 安装**：`brew install sdl2`
 - **GitHub 仓库**：`Lezheng2333/starfox_spaceshooter`
 
+## 配套工具：Asset Studio 素材工坊
+
+- **进入网址**：**http://127.0.0.1:8791/**　（忘记网址时就查这里）
+- **位置**：`tools/asset_studio/`（独立于游戏源码，**主游戏零改动**）
+- **启动**（自动编译 + 起服务 + 开浏览器）：
+  ```bash
+  tools/asset_studio/studio.sh
+  ```
+- **用途**：浏览 / 预览 / 创作游戏全部美术素材（47 个），
+  补回 TEST 模式退役后失去的"素材草稿箱"；存档系统管"从任意节点测玩法"，工坊管"做素材"
+- **常用命令**：
+  ```bash
+  cd tools/asset_studio
+  ./assetstudio --verify-all          # 批量自检（所有素材 × 所有状态）
+  python3 registry/scanner.py         # 未登记检查（源码绘制入口 vs 注册表）
+  make server                         # 编译 + 起服务
+  ```
+- **文档**：`SPEC.md`（设计与建设过程中的发现）、`DEVELOPMENT_LOG.md`（独立开发日志，从 0.1.0 起）
+- **关键前提**：本作素材是 C++ 绘制代码而非图片文件，工具直接调用游戏真实绘制代码渲染，
+  以保证预览与游戏画面永不漂移
+
 ## 上下文恢复
 
 - 每次对话开始或 compact 之后，必须阅读 `DEVELOPMENT_LOG.md` 了解最新开发进展和最近版本变更
